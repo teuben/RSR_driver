@@ -7,10 +7,12 @@
  Released under GNU Public License (GPL v3)
  author: David O. Sánchez Argüelles (domars@inaoep.mx)
 """
-
-import dreampy
-from dreampy.redshift.netcdf import RedshiftNetCDFFile
-from dreampy.redshift.utils.correlate_lines import CrossCorrelation
+try:
+    import dreampy3 as dreampy
+    from dreampy3.redshift.netcdf import RedshiftNetCDFFile
+except ImportError:
+    import dreampy
+    from dreampy.redshift.netcdf import RedshiftNetCDFFile
 from datetime import date
 from scipy import signal
 from collections import OrderedDict 
@@ -21,7 +23,7 @@ import os.path
 import argparse
 import warnings
 
-script_version ="0.1rc"
+script_version ="0.2rc"
 
 def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
     """ Locate the RSR files for a given obsnum and chassis number
@@ -237,7 +239,7 @@ def rsr_driver_start (clargs):
 
     parser.add_argument('obslist', help="Text file with obsnums to process, one obsnum per row")
     parser.add_argument('-p', dest ="doplot", action="store_true", help="Produce default plots")
-    parser.add_argument('-t','--threshold',dest="cthresh", type=float, default = 0.01, help="Thershold sigma value when coadding all observations")
+    parser.add_argument('-t','--threshold',dest="cthresh", type=float, help="Thershold sigma value when coadding all observations")
     parser.add_argument('-o','--output', dest="output", default="", help="Output file name containing the spectrum")
     parser.add_argument('-f','--filter', dest="filter", default=0, help="Apply Savitzky-Golay filter (SGF) to reduce large scale trends in the spectrum. Must be an odd integer. This value represent the number of channels used to aproximate the baseline. Recomended values are larger than 21. Default is to not apply the SGF", type=int)
     parser.add_argument('-s','--smothing', dest ="smooth", default=0, type=int, help="Number of channels of a boxcar lowpass filter applied  to the coadded spectrum. Default is to no apply filter")
@@ -308,6 +310,9 @@ def rsr_driver_start (clargs):
             nc.sync()
             nc.close()
 
+    if len(hdulist) == 0:
+        raise FileNotFoundError("No RSR data files were found. Check the -d parameter or the DATA_LMT environment variable")
+
     add_info(process_info, "Integration Time", real_tint, "s")
 
     if args.filter >0:
@@ -323,13 +328,17 @@ def rsr_driver_start (clargs):
         add_info(process_info, "Simulated: ", "{} K, {} GHz, {} GHz".format(args.simulate[0], args.simulate[1], args.simulate[2]), "") 
 
     hdu = hdulist[0]  # get the first observation
-    hdu.average_scans(hdulist[1:],threshold_sigma=args.cthresh)
+    if args.cthresh:
+        hdu.average_scans(hdulist[1:],threshold_sigma=args.cthresh)
+    else:
+        hdu.average_scans(hdulist[1:])
     add_info(process_info,"Coadd Sigma threshold", args.cthresh, "K")
 
     if args.smooth > 0:
         add_info(process_info, "Smoothing Channels", args.smooth, "")
         hdu.smooth(nchan=args.smooth)
     hdu.make_composite_scan()
+    
     update_compspec_sigma(hdu)
 
     if args.output == "":
@@ -340,7 +349,10 @@ def rsr_driver_start (clargs):
     numpy.savetxt(outfile, out_array, header = rsr_output_header(hdu,process_info))
 
     if args.doplot:
-        from dreampy.redshift.plots import RedshiftPlot
+        try:
+            from dreampy3.redshift.plots import RedshiftPlot
+        except ImportError:
+            from dreampy.redshift.plots import RedshiftPlot
         pl1 = RedshiftPlot()
         pl = RedshiftPlot()
         pl1.plot_spectra(hdu)
