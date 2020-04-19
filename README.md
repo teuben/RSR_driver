@@ -1,12 +1,12 @@
 # RSR_driver
-A collection of script to work with the RSR DREAMPY pipeline
+A collection of scripts to work with the RSR DREAMPY pipeline
 
 ## Requirements
-DREAMPY needs to be installed for the script to work. Also you need to configure a directory with the LMT data.
+DREAMPY or DREAMPY3 needs to be installed for the script to work. Also you need to configure a directory with the LMT data.
 
 ## Usage
 
-In a text file write down all the Observation Numbers corresponding to the raw RSR NetCDF files.
+In a text file write down all the Observation Numbers (ObsNum) corresponding to the raw RSR NetCDF files. One ObsNum per row.
 
 Then simply run: 
 ```
