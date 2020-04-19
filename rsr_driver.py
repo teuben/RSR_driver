@@ -15,6 +15,7 @@ except ImportError:
     from dreampy.redshift.netcdf import RedshiftNetCDFFile
 from datetime import date
 from scipy import signal
+from scipy import interpolate
 from collections import OrderedDict 
 import sys
 import numpy
@@ -22,6 +23,7 @@ import glob
 import os.path
 import argparse
 import warnings
+import copy
 
 script_version ="0.2rc"
 
@@ -90,12 +92,13 @@ def rsr_output_header(hdu, infodict):
     
     return string
 
-def rebaseline (nc, fwind=33):
+def rebaseline (nc, fwind=33, exclude = None):
     """Performs a Savitzky-Golay filter on RSR band based data
     
        Args:
         nc (RedshiftNetCDFFile): Object containing the spectrum.
         fwind (int): Filter window. Number of samples to construct the filter on. Need to be an odd number. (Default 33).
+        exclude (dict): A dictionary with the frequencies to exclude from baseline calculations.
        Note:
         Data in the nc.hdu.spectrum will be replaced with filtered data
     """
@@ -130,7 +133,21 @@ def rebaseline (nc, fwind=33):
                 print("Requested SGF window %d is too large for valid data scan %d. Changing window to %d" %(fwind, slen, awind ) )
             else:
                 awind = fwind
-            data[iband,sec_start[iscan]:sec_end[iscan]] -= signal.savgol_filter(data[iband,sec_start[iscan]:sec_end[iscan]],awind,3)
+            #Now we check if the user wants a section to be ignored from the SGF calculations
+            data_filter = data[iband,sec_start[iscan]:sec_end[iscan]].copy()
+            freq_filter = freq[iband,sec_start[iscan]:sec_end[iscan]].copy()
+            if not exclude is None:
+                for ifreq, iwidth in zip(exclude['freqs'], exclude['widths']):
+                    if ifreq >= freq_filter.min() and ifreq<=freq_filter.max():
+                        wex = numpy.where(numpy.logical_and(freq_filter >= ifreq-iwidth,
+                                                            freq_filter <= ifreq+iwidth))
+                        wnex = numpy.where(numpy.logical_or(freq_filter < ifreq-iwidth,
+                                                            freq_filter > ifreq+iwidth))
+                        dinterp = interpolate.interp1d(freq_filter[wnex], data_filter[wnex], kind="cubic")
+                        data_filter[wex]=dinterp(freq_filter[wex])
+                        print ("SGF: Removing interval {} to {} GHz".format(ifreq-iwidth,ifreq+iwidth))
+                
+            data[iband,sec_start[iscan]:sec_end[iscan]] -= signal.savgol_filter(data_filter,awind,3)
     nc.hdu.spectrum[0,:,:] = data
     nc.hdu.baseline()
     
@@ -212,7 +229,6 @@ def vel2dfreq (freq, vel):
     return freq*((1.+beta)/(1.-beta))**0.5-freq
 
 def dfreq2vel(freq, dfreq):
-
     """Convert a increment of frequency in a velocity displacement
     
         Parameters:
@@ -224,6 +240,57 @@ def dfreq2vel(freq, dfreq):
     
     nfreq = freq+dfreq
     return numpy.abs((freq**2-nfreq**2)/(nfreq**2+freq**2)*c)
+
+def setup_default_windows (nc):
+    """ Generate a the default window values for baseline estimation
+    
+        Parameters:
+            nc (RedshiftNetCDFFile):    A redshift raw data file to get the frequency values
+            
+        Returns:
+            windows (dict): A dictionary with each band maximum a minimum values
+    """
+    
+    nbands = nc.hdu.frequencies.shape[0]
+    windows ={}
+    
+    for i in range(nbands):
+        windows[i] = [(nc.hdu.frequencies[i].min(),nc.hdu.frequencies[i].max() )]
+    
+    print ("Generating default baseline windows values to include all data", windows)
+    
+    return windows
+
+def update_windows (windows, limits, exclude):
+    """ Modify the windows dictionaty to exlucde the interval freqs-widths to freqs+widths from the baseline estimation
+    
+        Parameters:
+            windows (dict): Dictionary with the current values of windows
+            limits (dict): Limits of each RSR band, usually a defaul windows dict
+            exclude (dict): A dictionary with the freqs and widths to exclude 
+    """
+    freqs = exclude['freqs']
+    widths = exclude['widths']
+    
+    sorti = numpy.argsort (freqs)
+    freqs = freqs[sorti]
+    widths = widths[sorti]
+    
+    exclude['freqs'] = freqs
+    exclude['widths'] = widths
+    
+    
+    for i in range(len(freqs)):
+        for iband in range (len(limits)):
+            if freqs[i]>=limits[iband][0][0] and freqs[i]<=limits[iband][0][-1]:
+                newtuples = []
+                for ituple in windows[iband]:
+                    if freqs[i]>= ituple[0] and freqs[i] <= ituple[-1]:
+                        newtuples.append((ituple[0],freqs[i]-widths[i]))
+                        newtuples.append((freqs[i]+widths[i], ituple[1]))
+                    else:
+                        newtuples.append(ituple)
+                windows[iband]= newtuples
 
 
 
@@ -248,12 +315,15 @@ def rsr_driver_start (clargs):
     parser.add_argument('--simulate', nargs='+', help="Insert a simulated line into spectrum. The format is a list or a set of three elements Amplitude central_frequency line_velocity_width.", type = float)
 
     parser.add_argument('-d','--data_lmt_path', dest = "data_lmt",help="Path where the LMT data is located (defaults to /data_lmt", default="/data_lmt/")  
+    
+    parser.add_argument('--exclude', nargs='+', dest ="exclude", help="A set of frequencies to exclude from baseline calculations. Format is central frequenciy width. Ej --exclude 76.0 0.2 96.0 0.3 excludes the 75.8-76.2 GHz and the 95.7-96.3 intervals from the baselien calculations.")
 
 
     args = parser.parse_args(clargs)
 
     hdulist = []
-    windows = {}
+    windows = None
+    exclude = None
 
     process_info=OrderedDict()
 
@@ -285,8 +355,24 @@ def rsr_driver_start (clargs):
                     continue
             if source is None:
                     source = nc.hdu.header.SourceName
+                            
+        
         
             nc.hdu.process_scan(corr_linear=True) 
+            
+            if windows is None:
+                windows = setup_default_windows(nc)
+                
+                if args.exclude:
+                    if len(args.exclude) % 2 !=0:
+                        raise Exception ("Incorrect information provided in keyword exclude")
+                    limits = copy.deepcopy(windows)
+                    exclude = {}
+                    exclude['freqs'] = numpy.array(args.exclude[0::2], dtype=float)
+                    exclude['widths'] = numpy.array(args.exclude[1::2], dtype=float)
+                    
+                    update_windows(windows,limits,exclude)
+                                   
             
             if args.simulate:
                 insert_sim(nc, *args.simulate)
@@ -300,7 +386,7 @@ def rsr_driver_start (clargs):
             else:
                 nc.hdu.average_all_repeats(weight='sigma')
             if args.filter >0:
-                rebaseline(nc, args.filter)
+                rebaseline(nc, args.filter,exclude=exclude)
 
 
             integ = 2*int(nc.hdu.header.get('Bs.NumRepeats'))*int(nc.hdu.header.get('Bs.TSamp'))
