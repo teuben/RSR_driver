@@ -10,12 +10,17 @@
 try:
     import dreampy3 as dreampy
     from dreampy3.redshift.netcdf import RedshiftNetCDFFile
+    from dreampy3.redshift.netcdf.redshift_scan import RedshiftScan
+    from dreampy3.redshift.utils.spectrum_utils import blank as spec_blank_value
 except ImportError:
     import dreampy
     from dreampy.redshift.netcdf import RedshiftNetCDFFile
+    from dreampy.redshift.netcdf.redshift_scan import RedshiftScan
+    from dreampy.redshift.utils.spectrum_utils import blank as spec_blank_value
 from datetime import date
 from scipy import signal
 from scipy import interpolate
+from scipy import stats
 from collections import OrderedDict 
 import sys
 import numpy
@@ -24,8 +29,9 @@ import os.path
 import argparse
 import warnings
 import copy
+import shlex
 
-script_version ="0.2rc"
+script_version ="0.3rc"
 
 def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
     """ Locate the RSR files for a given obsnum and chassis number
@@ -79,77 +85,157 @@ def rsr_output_header(hdu, infodict):
     string +="Frequency Units: GHz\n"
     string +="Spectrum Units: K (T_A)\n"
     string +="Band intervals (GHz):"
-    for i in range(sigma.shape[0]-1):
-        string +="(%.3f-%.3f)," %(hdu.frequencies[i].min(), hdu.frequencies[i].max())
-    string+= "(%.3f-%.3f)\n" %(hdu.frequencies[-1].min(), hdu.frequencies[-1].max())
+    for i in range(sigma.shape[0]):
+        wvalid = numpy.where(numpy.isfinite(hdu.spectrum[0,i]))
+        if len(wvalid[0]) > 0:
+            string +="(%.3f-%.3f)," %(hdu.frequencies[i,wvalid].min(), hdu.frequencies[i,wvalid].max())
+    #string+= "(%.3f-%.3f)\n" %(hdu.frequencies[-1].min(), hdu.frequencies[-1].max())
+    string = string[:-1]+"\n"
     string +="Sigma per band: "
-    for i in range(sigma.shape[0]-1):
+    for i in range(sigma.shape[0]):
         string +="%f," %sigma[i]
-    string += "%f\n"%sigma[-1]
+    #string += "%f\n"%sigma[-1]
+    string=string[:-1]+"\n"
     for ikey in infodict.keys():
         string += "{}: {} {}\n".format(ikey, infodict[ikey]["value"], infodict[ikey]["units"])
     string +="------------------------------------------------\n"
     
     return string
 
-def rebaseline (nc, fwind=33, exclude = None):
-    """Performs a Savitzky-Golay filter on RSR band based data
+   
+
+def rsr_savgolfilter(data_in, freq_in, fwind, exclude=None):
+        
+    """ Apply Savitzky-Golay filter (SGF) to the input data. This is a high-pass version of the filter.
+    
+        Args:
+            freq_in (float ndarray): RSR Frequency
+            data_in (float ndarray): RSR Spectrum
+            fwind (float):           Window parameter to SGF
+        
+        Note: The RSR data (spectra) is mean subtracted before any calculation.
+    """
+    if  fwind %2 ==0:
+        raise Exception ("You must provide an odd number for the Savitzky-Golay filter to work")
+    
+    slen = len (data_in)
+
+
+    if fwind > slen-3:
+        redfactor = 256/fwind
+        awind = (slen)/redfactor
+        if awind % 2 == 0:
+            awind+=1
+        print("Requested SGF window %d is too large for valid data scan %d. Changing window to %d" %(fwind, slen, awind ) )
+    else:
+        awind = fwind
+    #Now we check if the user wants a section to be ignored from the SGF calculations
+
+    data_filter = data_in.copy()
+    freq_filter = freq_in.copy()
+    spline_weight = numpy.ones(slen)
+    data_filter -=data_filter.mean()
+    if not exclude is None:
+        for ifreq, iwidth in zip(exclude['freqs'], exclude['widths']):
+            if ifreq >= freq_filter.min() and ifreq<=freq_filter.max():
+                wex = numpy.where(numpy.logical_and(freq_filter >= ifreq-iwidth,
+                                                    freq_filter <= ifreq+iwidth))
+                wnex = numpy.where(numpy.logical_or(freq_filter < ifreq-iwidth,
+                                                    freq_filter > ifreq+iwidth))
+                spline_weight[wex] = 0.7
+
+                dinterp = interpolate.UnivariateSpline(freq_filter, data_filter, w=spline_weight, s=0.5)#,s =len(data_filter)/4)
+                print ("SGF: Removing interval {} to {} GHz".format(ifreq-iwidth,ifreq+iwidth))
+        
+    data_filter -= signal.savgol_filter(data_filter,awind,3)
+    return data_filter
+
+def rsr_notchfilter(freq_in, data_in, sigma):
+            
+    """ Implement a naive notch filter to RSR spectra in order to remove oscillations in the baseline. It work by analizing the RSR data
+        PSD. If a peak in the PSD exceed the sigma thershold it is removed.
+    
+        Args:
+            freq_in (float ndarray): RSR Frequency
+            data_in (float ndarray): RSR Spectrum
+            sigma (float):           Sigma threshold level to consider a baseline oscilation to be removed.
+        
+        Note: The RSR data (spectra) is mean subtracted before any calculation.
+    """
+
+    dspec = data_in.copy()
+    fspec = freq_in.copy()
+    
+    dspec -=dspec.mean()
+    
+    fft_spec = numpy.fft.rfft(dspec)
+    fft_freq = numpy.fft.rfftfreq(len(dspec), d=numpy.abs(fspec[1]-fspec[0]))
+    spec_spec = numpy.abs(fft_spec)**2
+    thspec,mins, maxs = stats.sigmaclip(spec_spec[1:], high= 4)
+    w = numpy.where(spec_spec > sigma*thspec.std())
+    fft_spec[0]=0.0
+    fft_spec[w]=0.0
+    dspec=numpy.fft.irfft(fft_spec)
+    
+    return dspec
+
+def rebaseline (nc, farg=None, exclude = None, notch = False):
+    """Performs a Savitzky-Golay (SG) or a Notch filter on RSR band based data. SG filter is suitable for low order trends in the data. Notch filter is sutable for    oscilations in the baseline. 
     
        Args:
         nc (RedshiftNetCDFFile): Object containing the spectrum.
-        fwind (int): Filter window. Number of samples to construct the filter on. Need to be an odd number. (Default 33).
+        farg (int): Filter argument window. In case of the SG filter is the window lenght. For the notch filter is the sigma thershold for cutting a frequency
         exclude (dict): A dictionary with the frequencies to exclude from baseline calculations.
+        notch (bool): If false (default) apply Savitzky-Golay filter. If True apply notch filter.
        Note:
         Data in the nc.hdu.spectrum will be replaced with filtered data
     """
     
-    if fwind %2 ==0:
-        raise Exception ("You must provide an odd number for the Savitzky-Golay filter to work")
-    nband = nc.hdu.spectrum.shape[1]
-    data = nc.hdu.spectrum.copy().squeeze()
-    freq = nc.hdu.frequencies
+    if farg is None:
+        if not notch:
+            farg = 55
+        else:
+            farg = 10
+    
+    if type(nc) is RedshiftNetCDFFile:
+        hdu = nc.hdu
+    elif type(nc) is RedshiftScan:
+        hdu = nc
+    else:
+        raise TypeError("Argument passed to rebaseline must be a Redshift NetCDF File or Redshift Scan")
+    nband = hdu.spectrum.shape[1]
+    data = hdu.spectrum.copy().squeeze()
+    freq = hdu.frequencies
     
     for iband in range(nband):
         sec_start =[]
         sec_end =[]
         onScan=False
         for isample in range(data.shape[1]):
-            if numpy.isfinite (data[iband, isample]) and data[iband, isample] != nc.hdu.blank and not onScan:
+            if numpy.isfinite (data[iband, isample]) and data[iband, isample] != hdu.blank and not onScan:
                 onScan=True
                 sec_start.append(isample)
                 continue
-            if onScan and ( not numpy.isfinite (data[iband, isample]) or data[iband, isample] == nc.hdu.blank):
+            if onScan and ( not numpy.isfinite (data[iband, isample]) or data[iband, isample] == hdu.blank):
                 sec_end.append(isample)
                 onScan = False
         nscans = len(sec_start)
-        print ("Found %d scans on band %s on obs %s"%(nscans,iband, nc.hdu.header.obs_string()))
+        print ("Found %d scans on band %s on obs %s"%(nscans,iband, hdu.header.obs_string()))
         for iscan in range(nscans):
-            slen = sec_end[iscan]-sec_start[iscan]
-            if fwind > slen-3:
-                redfactor = 256/fwind
-                awind = (slen)/redfactor
-                if awind % 2 == 0:
-                    awind+=1
-                print("Requested SGF window %d is too large for valid data scan %d. Changing window to %d" %(fwind, slen, awind ) )
+            
+            if not notch:
+                data_filter = rsr_savgolfilter(data[iband,sec_start[iscan]:sec_end[iscan]], \
+                                               freq[iband,sec_start[iscan]:sec_end[iscan]], \
+                                               int(farg),exclude=exclude)
             else:
-                awind = fwind
-            #Now we check if the user wants a section to be ignored from the SGF calculations
-            data_filter = data[iband,sec_start[iscan]:sec_end[iscan]].copy()
-            freq_filter = freq[iband,sec_start[iscan]:sec_end[iscan]].copy()
-            if not exclude is None:
-                for ifreq, iwidth in zip(exclude['freqs'], exclude['widths']):
-                    if ifreq >= freq_filter.min() and ifreq<=freq_filter.max():
-                        wex = numpy.where(numpy.logical_and(freq_filter >= ifreq-iwidth,
-                                                            freq_filter <= ifreq+iwidth))
-                        wnex = numpy.where(numpy.logical_or(freq_filter < ifreq-iwidth,
-                                                            freq_filter > ifreq+iwidth))
-                        dinterp = interpolate.interp1d(freq_filter[wnex], data_filter[wnex], kind="cubic")
-                        data_filter[wex]=dinterp(freq_filter[wex])
-                        print ("SGF: Removing interval {} to {} GHz".format(ifreq-iwidth,ifreq+iwidth))
-                
-            data[iband,sec_start[iscan]:sec_end[iscan]] -= signal.savgol_filter(data_filter,awind,3)
-    nc.hdu.spectrum[0,:,:] = data
-    nc.hdu.baseline()
+                data_filter = rsr_notchfilter(freq[iband,sec_start[iscan]:sec_end[iscan]], \
+                                              data[iband,sec_start[iscan]:sec_end[iscan]], \
+                                              sigma=farg)
+            
+            data[iband,sec_start[iscan]:sec_end[iscan]] =data_filter
+           
+    hdu.spectrum[0,:,:] = data
+    hdu.baseline()
     
 def freq_gaussian(freq,A,f_mu, f_width):
     """1D Gaussian Spectral Line 
@@ -163,7 +249,7 @@ def freq_gaussian(freq,A,f_mu, f_width):
            gauss_line (ndarray): An array containing the spectral line
     """
     u = (freq-f_mu)
-    sigma = 0.425*f_width
+    sigma = f_width/(2*(2*numpy.log(2))**0.5)
     u /= sigma
     return A*numpy.exp(-0.5*u**2)
 
@@ -203,8 +289,30 @@ def update_compspec_sigma(hdu):
     
     for iband in range(nbands):
         hdu.sigma[0,iband] = numpy.nanstd(hdu.spectrum[0,iband])
+    #Now create a sigma array with the frequencies
+    
+    compsigma = numpy.zeros(hdu.compfreq.shape)
+    bandlimits = setup_default_windows(hdu)
+    
+    
+    nbands = bandlimits.keys()
+    for i in range(hdu.compfreq.shape[0]):
+        sigma_vals = []
+        for ikey in nbands:
+            if hdu.compfreq[i]>= bandlimits[ikey][0][0] and hdu.compfreq[i]<= bandlimits[ikey][0][1]:
+                mindis = numpy.abs(hdu.frequencies[ikey] - hdu.compfreq[i])
+                w = numpy.where(mindis == mindis.min())
+                if numpy.isfinite(hdu.spectrum[0,ikey,w]):
+                    sigma_vals.append(hdu.sigma[0,ikey])
+        if len(sigma_vals) > 0:
+            sigma_vals = numpy.array(sigma_vals)
+            compsigma[i] = numpy.sqrt(numpy.sum(sigma_vals**2)/sigma_vals.shape[0]) 
+        else:
+            compsigma[i] = numpy.nan
+    
+    return compsigma
         
-def add_info (infodict, label, value, units):
+def add_info (infodict, label, value, units=""):
     """ Add information to a dictionary in order to be compatible with the rsr_output_header function
     
         Args:
@@ -251,11 +359,18 @@ def setup_default_windows (nc):
             windows (dict): A dictionary with each band maximum a minimum values
     """
     
-    nbands = nc.hdu.frequencies.shape[0]
+    if type(nc) is RedshiftNetCDFFile:
+        hdu = nc.hdu
+    elif type(nc) is RedshiftScan:
+        hdu = nc
+    else:
+        raise TypeError("Argument passed to setup_default_windows must be a Redshift NetCDF File or Redshift Scan")
+    
+    nbands = hdu.frequencies.shape[0]
     windows ={}
     
     for i in range(nbands):
-        windows[i] = [(nc.hdu.frequencies[i].min(),nc.hdu.frequencies[i].max() )]
+        windows[i] = [(hdu.frequencies[i].min(),hdu.frequencies[i].max() )]
     
     print ("Generating default baseline windows values to include all data", windows)
     
@@ -311,13 +426,22 @@ def rsr_driver_start (clargs):
     parser.add_argument('-f','--filter', dest="filter", default=0, help="Apply Savitzky-Golay filter (SGF) to reduce large scale trends in the spectrum. Must be an odd integer. This value represent the number of channels used to aproximate the baseline. Recomended values are larger than 21. Default is to not apply the SGF", type=int)
     parser.add_argument('-s','--smothing', dest ="smooth", default=0, type=int, help="Number of channels of a boxcar lowpass filter applied  to the coadded spectrum. Default is to no apply filter")
     parser.add_argument('-r','--repeat_thr', dest = "rthr", type = float,help="Thershold sigma value when averaging single observations repeats")  
+    parser.add_argument('-n', '--notch_sigma', dest = "notch", help="Sigma cut for notch filter to eliminate large frecuency oscillations in spectrum. Needs to be run with -f option.", type =float)
 
     parser.add_argument('--simulate', nargs='+', help="Insert a simulated line into spectrum. The format is a list or a set of three elements Amplitude central_frequency line_velocity_width.", type = float)
 
     parser.add_argument('-d','--data_lmt_path', dest = "data_lmt",help="Path where the LMT data is located (defaults to /data_lmt", default="/data_lmt/")  
     
+    parser.add_argument('-b', dest="baseline_order", default = 1, help="Baseline calculation order", type=int)
+    
     parser.add_argument('--exclude', nargs='+', dest ="exclude", help="A set of frequencies to exclude from baseline calculations. Format is central frequenciy width. Ej --exclude 76.0 0.2 96.0 0.3 excludes the 75.8-76.2 GHz and the 95.7-96.3 intervals from the baselien calculations.")
+    
+    parser.add_argument ('-j', dest="jacknife", action="store_true",help ="Perform jacknife simulation")
 
+
+    parser.add_argument('-c', dest= "chassis", nargs='+', help = "List of chassis to use in reduction. Default is the four chassis")
+    
+    parser.add_argument('-R', '--rfile', help="A file with information of band data to ignore from analysis. The file must include the obsnum, chassis and band number to exclude separated by comas. One band per row")
 
     args = parser.parse_args(clargs)
 
@@ -330,17 +454,49 @@ def rsr_driver_start (clargs):
     tint = 0.0
     real_tint = 0.0
     source = None
-
-    Obslist = numpy.loadtxt(args.obslist, unpack=True, dtype="int")
+    
+    Obslist = numpy.loadtxt(args.obslist, dtype="int")
+    
+    if numpy.ndim(Obslist)==0:
+        tmplist = []
+        tmplist.append(Obslist)
+        Obslist = tmplist
 
     if args.simulate:
         
         if len(args.simulate) != 3:
             raise Exception("Incorrect information provided to simulation function. Need 3 parameters separated by spaces")
         args.simulate[-1] = vel2dfreq(args.simulate[1], args.simulate[-1])
+    
+    if args.chassis:
+        if len(args.chassis) > 4:
+            raise ValueError ("Incorrect number of chassis supplied. RSR only have four chassis")
+        
+        use_chassis = numpy.array(args.chassis, dtype=int)
+        use_chassis = tuple (numpy.unique(use_chassis))
+    else:
+        use_chassis = tuple  ((0,1,2,3))
+        
+    remove_keys = None
+    rpattern = "O%06d_c%02d"
+    if args.rfile:
+        remove_keys ={}
+        with open (args.rfile) as rfile:
+            for iline in rfile.readlines():
+                ronum, rchassis, rband = iline.split(",")
+                rkey = rpattern %(int (ronum),int(rchassis))
+                if not rkey in remove_keys.keys():
+                    remove_keys[rkey] = []
+                remove_keys[rkey].append(int(rband))
+
+    alltau = []
 
     for ObsNum in Obslist:
-        for chassis in [0,1,2,3]:
+        nfiles_per_onum = 0
+        tint_per_onum = 0.
+        tau_onum = 0.
+        ntau_onum = 0
+        for chassis in use_chassis:
 
             filename = rsrFileSearch(ObsNum, chassis, root=args.data_lmt)
             
@@ -357,8 +513,12 @@ def rsr_driver_start (clargs):
                     source = nc.hdu.header.SourceName
                             
         
-        
-            nc.hdu.process_scan(corr_linear=True) 
+            try: 
+            	nc.hdu.process_scan(corr_linear=True) 
+            except:
+                print ("Cannot proces file %s. This is probably an incomplete observation" % filename)
+                nc.close()
+                continue
             
             if windows is None:
                 windows = setup_default_windows(nc)
@@ -379,28 +539,48 @@ def rsr_driver_start (clargs):
             
             if chassis in(2,3): 
                     nc.hdu.blank_frequencies( {3: [(95.5,97.0),]} )
-            nc.hdu.baseline(order = 1, subtract=True, windows=windows)
+            
+            if not remove_keys is None:
+                rk = rpattern % (ObsNum, chassis)
+                if rk in remove_keys.keys():
+                    for iband in remove_keys[rk]:
+                        nc.hdu.blank_frequencies ({iband:[(windows[iband][0][0],windows[iband][0][-1]),]})
+                        print ("Remove band %d from ObsNum %d Chassis %d" % (iband, ObsNum, chassis))
+
+            
+            nc.hdu.baseline(order = args.baseline_order, subtract=True, windows=windows)
             
             if args.rthr:
                 nc.hdu.average_all_repeats(weight='sigma', threshold_sigma=float(args.rthr))
             else:
                 nc.hdu.average_all_repeats(weight='sigma')
-            if args.filter >0:
-                rebaseline(nc, args.filter,exclude=exclude)
+            if args.filter:
+                rebaseline(nc, farg= args.filter,exclude=exclude)
+
 
 
             integ = 2*int(nc.hdu.header.get('Bs.NumRepeats'))*int(nc.hdu.header.get('Bs.TSamp'))
+            itau = nc.hdu.header.get('Radiometer.Tau')
+            if itau > 0.0:
+                tau_onum+=itau
+                ntau_onum+=1
             tint += integ
-            real_tint += (nc.hdu.data.AccSamples/48124.).mean(axis=1).sum()        
+            tint_per_onum += (nc.hdu.data.AccSamples/48124.).mean(axis=1).sum()
+            nfiles_per_onum +=1
             hdulist.append(nc.hdu)
             nc.sync()
             nc.close()
+        if nfiles_per_onum > 0:
+            real_tint += tint_per_onum/nfiles_per_onum
+        if ntau_onum >0:
+            alltau.append(tau_onum/ntau_onum)
+    avgtau = numpy.mean(alltau)
 
     if len(hdulist) == 0:
         raise FileNotFoundError("No RSR data files were found. Check the -d parameter or the DATA_LMT environment variable")
 
     add_info(process_info, "Integration Time", real_tint, "s")
-
+    add_info(process_info, "Average Opacity (220GHz)", numpy.around(avgtau,2))
     if args.filter >0:
         freqd = args.filter*(nc.hdu.frequencies[1,0]-nc.hdu.frequencies[1,1])
         add_info(process_info, "SGF Window Size", args.filter," channels")
@@ -414,25 +594,44 @@ def rsr_driver_start (clargs):
         add_info(process_info, "Simulated: ", "{} K, {} GHz, {} GHz".format(args.simulate[0], args.simulate[1], args.simulate[2]), "") 
 
     hdu = hdulist[0]  # get the first observation
+    
+    if args.jacknife:
+        rand_signs = numpy.sign(numpy.random.uniform(-0.5,0.5,size = len (hdulist)))
+        print rand_signs
+        for ihdu, isign in zip(hdulist,rand_signs):
+            wvalues = numpy.where(numpy.logical_and(numpy.isfinite(ihdu.spectrum), ihdu.spectrum != spec_blank_value))
+            if isign == 0:
+                isign = 1
+            ihdu.spectrum[wvalues]*=isign
+    
     if args.cthresh:
         hdu.average_scans(hdulist[1:],threshold_sigma=args.cthresh)
     else:
         hdu.average_scans(hdulist[1:])
     add_info(process_info,"Coadd Sigma threshold", args.cthresh, "K")
 
+    if args.filter:
+        rebaseline(hdu,farg=args.filter)
+
+    if args.notch:
+        rebaseline(hdu,farg=args.notch,notch=True)
+        add_info(process_info, "Notch Filter Sigma", args.notch, "")
     if args.smooth > 0:
         add_info(process_info, "Smoothing Channels", args.smooth, "")
         hdu.smooth(nchan=args.smooth)
     hdu.make_composite_scan()
     
-    update_compspec_sigma(hdu)
+    compsigma = update_compspec_sigma(hdu)
 
+
+    add_info(process_info, "RSR driver cmd", " ".join(clargs))
     if args.output == "":
         outfile = "%s_rsr_spectrum.txt"%source
     else:
         outfile = args.output
-    out_array = numpy.array ([hdu.compfreq,hdu.compspectrum.squeeze()]).T
+    out_array = numpy.array ([hdu.compfreq,hdu.compspectrum.squeeze(), compsigma]).T
     numpy.savetxt(outfile, out_array, header = rsr_output_header(hdu,process_info))
+    hdu.write_spectra_to_ascii(outfile.replace(".txt", "_bandspec.txt"))
 
     if args.doplot:
         try:
@@ -454,6 +653,6 @@ if __name__ == "__main__":
     
         See:
             rsr_driver -h
-    
     """
-    rsr_driver_start(sys.argv[1:])
+
+    rsr_driver_start(sys.argv[1:]) 
