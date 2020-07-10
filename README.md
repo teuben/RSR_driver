@@ -2,7 +2,7 @@
 A wrapper script to work with the RSR DREAMPY pipeline
 
 ## Requirements
-DREAMPY or DREAMPY3 needs to be installed for the script to work. Also you need to configure a directory with the LMT data using the DATA_LMT environment variable.
+DREAMPY or ([DREAMPY3] https://github.com/lmt-heterodyne/dreampy3) needs to be installed for the script to work. Also you need to configure a directory with the LMT data using the DATA_LMT environment variable. 
 
 ## Installation
 
@@ -50,3 +50,17 @@ To understand the difference between these files you need to know that the RSR 3
 The **_rsr_spectrm_bandspec** contains the average spectrum of all the processed raw files separated per band. The shape of the data is [256,12]. The odd columns contain the frequency values in GHz and the even columns contain the spectrum values in antenna temperature units (K).
 
 The **rsr_spectrum** is considered the main output of the pipeline. In this case the frequency channels that overlap within adjacent bands are averaged and a single frequency axis is defined. The shape of the data is [256,3]. The first column contains the frequency values in GHz, the second and the third contains the spectrum and the statistical error in antenna temperature units (K).
+
+## Dealing with noisy data
+
+DREAMPY uses a weighted average to produce the output spectra. In this scheme, the standard deviation of each band is used to compute the weights. However, sometimes this is not enough to produce good quality output spectrum. The rsr_driver exports two parameters to remove noisy data with the flags **-r** and **-t**. Both define a thershold levels for remove a particular band from the reduction process.
+
+The **-r** flags works on a single raw file on a *repeat* level. The RSR is dual beam, dual polarization receiver. A standrard observation contains five repeats where 30 s are integrated with the source on one beam and 30 s with the source in the complementary polarization beam. This accounts for a  minute integration per repeat. As an example, to remove all the repeats which standard deviation exceeds 10mK you can issue the following command:
+
+```
+python rsr_driver.py obsnum.txt -r 0.01
+```
+
+The **-t** flag works when averaing all the raw files. This removes from the final average all the bands exceeding the value sent to the RSR_driver via this parameter. A good practice is to use a equal or smaller value than the **-r**. 
+
+
