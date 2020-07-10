@@ -31,7 +31,7 @@ import warnings
 import copy
 import shlex
 
-script_version ="0.3rc"
+script_version ="0.4.0-rc"
 
 def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
     """ Locate the RSR files for a given obsnum and chassis number
@@ -40,9 +40,11 @@ def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
           obsnum (int): Unique observation number for a LMT observation.
           chassis (int): Number of the RSR chassis. Must be in range [0-3].
           root (str): Absolute path where the LMT data is stored.
-          full (bool): If true returns the absolute file path. If false return the relative file path. (Default is True)
+          full (bool): If true returns the absolute file path. If false return 
+          the relative file path. (Default is True)
         Returns:
-          filename (str): Path to RSR data file if it exists or an empty string if the file is not found.
+          filename (str): Path to RSR data file if it exists or an empty string 
+          if the file is not found.
     """
     if chassis < 0 or chassis >3:
             print ("Error no chassis %d" % chassis)
@@ -63,7 +65,9 @@ def rsr_output_header(hdu, infodict):
     
         Args:
            hdu (object): Header Data Unit processed from a RedshiftNetCDFFile
-           infodict (dict): Dictionary containing additional information to verbose into the header. The elements of this dictionary must have been creater with the add_info function
+           infodict (dict): Dictionary containing additional information to verbose
+           into the header. The elements of this dictionary must have been creater 
+           with the add_info function
         
         Returns:
            header(str): The header string with the data reduction details
@@ -406,12 +410,45 @@ def update_windows (windows, limits, exclude):
                     else:
                         newtuples.append(ituple)
                 windows[iband]= newtuples
+                
 
+def load_obsnum_file(ifile):
+    """ Get a list ob observation number from the input file
+    
+        The raw LMT observation files are identified by a unique number (Observation Number or ObsNum). 
+        The input file could contain a single observation number per line or two observation numbers
+        separated by an hyphen, this notation is used to add to the observation list a range of files 
+    
+        Args: 
+            ifile (sting): The input file containing the ObsNum
+        
+        Returns:
+            A list with the ObsNums parsed from files
+    """
+    
+    obsnum_list = []
+    nline = 0
+    with open (ifile) as dfile:
+        for iline in dfile.readlines():
+            nline += 1
+            sline = iline.strip().split("-")
+            if len(sline)==1:
+                onum = int(sline[0])
+                obsnum_list.append(onum)
+            elif len(sline)==2:
+                snum = int(sline[0])
+                enum = int(sline[-1])
+                obsnum_list.extend(range(snum,enum+1))
+            else:
+                print ("Input file on line %d does not contain a valid ObsNum or ObsNume range. Ignoring")
 
+    if len(obsnum_list) == 0:
+        raise ValueError ("Input file does not contain any valid lines")
+    return obsnum_list
 
 def rsr_driver_start (clargs):
     
-    """ Routine that calls the DREAMPY routines to reduce the data
+    """ Routine that calls the DREAMPY package to reduce the data
     
         Args: 
             clargs (list): List of parameters from command line, use sys.argv[1:] or construct it using the shlex package
@@ -419,7 +456,7 @@ def rsr_driver_start (clargs):
 
     parser = argparse.ArgumentParser(description='Simple wrapper to process RSR spectra')
 
-    parser.add_argument('obslist', help="Text file with obsnums to process, one obsnum per row")
+    parser.add_argument('obslist', help="Text file with obsnums to process. Either one obsnum per row or a range of observation numbers separated by hyphens.")
     parser.add_argument('-p', dest ="doplot", action="store_true", help="Produce default plots")
     parser.add_argument('-t','--threshold',dest="cthresh", type=float, help="Thershold sigma value when coadding all observations")
     parser.add_argument('-o','--output', dest="output", default="", help="Output file name containing the spectrum")
@@ -441,7 +478,13 @@ def rsr_driver_start (clargs):
 
     parser.add_argument('-c', dest= "chassis", nargs='+', help = "List of chassis to use in reduction. Default is the four chassis")
     
-    parser.add_argument('-R', '--rfile', help="A file with information of band data to ignore from analysis. The file must include the obsnum, chassis and band number to exclude separated by comas. One band per row")
+    parser.add_argument('-R', '--rfile', help="A file with information of band data to ignore from analysis. \
+                        The file must include the obsnum, chassis and band number to exclude separated by comas. One band per row")
+    
+    parser.add_argument('--no-corr-cal', dest="corrcal", action="store_false", help="Disable non-linear \
+                        correlation correction. NOT RECOMMENDED.")
+    parser.add_argument('--no-baseline-sub', dest="nosub", action="store_false", help="Disable subtraction of \
+                        polinomial baseline. NOT RECOMMENDED.")
 
     args = parser.parse_args(clargs)
 
@@ -455,7 +498,8 @@ def rsr_driver_start (clargs):
     real_tint = 0.0
     source = None
     
-    Obslist = numpy.loadtxt(args.obslist, dtype="int")
+    
+    Obslist = load_obsnum_file(args.obslist)
     
     if numpy.ndim(Obslist)==0:
         tmplist = []
@@ -468,6 +512,12 @@ def rsr_driver_start (clargs):
             raise Exception("Incorrect information provided to simulation function. Need 3 parameters separated by spaces")
         args.simulate[-1] = vel2dfreq(args.simulate[1], args.simulate[-1])
     
+    if args.baseline_order < 0 or args.baseline_order > 3:
+        raise ValueError ("Requested a polynomial baseline subtraction of order %d. DREAMPY supports  \
+                          order in range from 0 to 3. Check the input of -b parameter" % args.baseline_order)
+    else:
+        add_info(process_info, "Polynomial Baseline Order", args.baseline_order)
+    add_info(process_info, "Linear Correction Applied", args.corrcal)
     if args.chassis:
         if len(args.chassis) > 4:
             raise ValueError ("Incorrect number of chassis supplied. RSR only have four chassis")
@@ -514,7 +564,7 @@ def rsr_driver_start (clargs):
                             
         
             try: 
-            	nc.hdu.process_scan(corr_linear=True) 
+            	nc.hdu.process_scan(corr_linear=args.corrcal) 
             except:
                 print ("Cannot proces file %s. This is probably an incomplete observation" % filename)
                 nc.close()
@@ -606,9 +656,10 @@ def rsr_driver_start (clargs):
     
     if args.cthresh:
         hdu.average_scans(hdulist[1:],threshold_sigma=args.cthresh)
+        add_info(process_info,"Coadd Sigma threshold", args.cthresh, "K")
     else:
         hdu.average_scans(hdulist[1:])
-    add_info(process_info,"Coadd Sigma threshold", args.cthresh, "K")
+    
 
     if args.filter:
         rebaseline(hdu,farg=args.filter)
