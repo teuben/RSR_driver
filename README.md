@@ -2,7 +2,7 @@
 A wrapper script to work with the RSR DREAMPY pipeline
 
 ## Requirements
-DREAMPY or ([DREAMPY3] https://github.com/lmt-heterodyne/dreampy3) needs to be installed for the script to work. Also you need to configure a directory with the LMT data using the DATA_LMT environment variable. 
+DREAMPY or ([DREAMPY3](https://github.com/lmt-heterodyne/dreampy3)) needs to be installed for the script to work. Also you need to configure a directory with the LMT data using the DATA_LMT environment variable. 
 
 ## Installation
 
