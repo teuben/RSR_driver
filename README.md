@@ -61,6 +61,10 @@ The **-r** flags works on a single raw file on a *repeat* level. The RSR is dual
 python rsr_driver.py obsnum.txt -r 0.01
 ```
 
-The **-t** flag works when averaing all the raw files. This removes from the final average all the bands exceeding the value sent to the RSR_driver via this parameter. A good practice is to use a equal or smaller value than the **-r**. 
+The **-t** flag works when averaing all the raw files. This removes from the final average all the bands exceeding the value sent to the RSR_driver via this parameter. A good practice is to use a equal or smaller value than the **-r**. Otherwise it might have no effect.
+
+## Notes on baseline subtraction
+
+
 
 
