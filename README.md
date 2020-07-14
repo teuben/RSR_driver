@@ -47,7 +47,7 @@ If you want to visualize the output just add the -p flag to the command and it w
 By default the wrapper uses the obsnum input filename and adds the suffixes **_rsr_spectum** and **_rsr_spectrum_bandspec** to store the output spectra. 
 To understand the difference between these files you need to know that the RSR 3mm frequency range is divided into 6 bands. The data of each band is stored and processed independently by most of the steps in the DREAMPY pipeline.
 
-The **_rsr_spectrm_bandspec** contains the average spectrum of all the processed raw files separated per band. The shape of the data is [256,12]. The odd columns contain the frequency values in GHz and the even columns contain the spectrum values in antenna temperature units (K).
+The **_rsr_spectrm_bandspec** contains the average spectrum of all the processed raw files separated per band. The shape of the data is [256,12]. The odd columns contain the frequency values in GHz and the even columns contain the spectrum values in antenna temperature units (K). In the DREAMPY plots this spectrum shows each band with a different color.
 
 The **rsr_spectrum** is considered the main output of the pipeline. In this case the frequency channels that overlap within adjacent bands are averaged and a single frequency axis is defined. The shape of the data is [256,3]. The first column contains the frequency values in GHz, the second and the third contains the spectrum and the statistical error in antenna temperature units (K).
 
@@ -65,6 +65,8 @@ The **-t** flag works when averaing all the raw files. This removes from the fin
 
 ## Notes on baseline subtraction
 
+The DREAMPY package implements a polynomial baseline subtraction in the band data. You can specify the order of the polynomial by the **-b** flag. Notice that the maximum order implemented is 3. You can disable the baseline subtraction with the **--no-baseline-sub**.
 
+Additionaly, you can use a high-pass Savitzky-Golay filter (SGF) to remove large variations in the baseline with the parameter **-f**. This parameter requires a number of samples used to calculate the sections of the filter. A larger value will consider more samples for a section of the filter hence it will remove larger scale variations. A recommended value is 55.
 
 
