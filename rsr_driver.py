@@ -492,13 +492,14 @@ def waterfall_plot (hdu, fig=None, thresh=None):
         for irep in range(nreps):
              for iband in range(6):
                 axes[irep].plot(hdu.frequencies[iband], plot_data[irep,iband], alpha = alphas[irep,iband])
-                axes[irep].set_title("ObsNum %d, Chassis %d, Repeat %d" %(onm,chassis,irep))
                 axes[irep].set_ylim(-5*data_std, 5*data_std)
+             axes[irep].text(hdu.frequencies.mean(),3*data_std,"ObsNum %d, Chassis %d, Repeat %d" %(onm,chassis,irep), ha="center")
     else:
         axes = fig.axes
         for iband in range(6):
             axes[-1].plot(hdu.frequencies[iband], plot_data[0,iband], alpha = alphas[0,iband])
             axes[-1].set_ylim(axes[0].get_ylim())
+        axes[-1].text(hdu.frequencies.mean(),3.0/5.0*axes[0].get_ylim()[1],"ObsNum %d, Chassis %d, Averaged" %(onm,chassis), ha="center")
     
     return fig
     
@@ -524,7 +525,7 @@ def rsr_driver_start (clargs):
 
     parser.add_argument('--simulate', nargs='+', help="Insert a simulated line into spectrum. The format is a list or a set of three elements Amplitude central_frequency line_velocity_width.", type = float)
 
-    parser.add_argument('-d','--data_lmt_path', dest = "data_lmt",help="Path where the LMT data is located (defaults to /data_lmt", default="/data_lmt/")  
+    parser.add_argument('-d','--data_lmt_path', dest = "data_lmt",help="Path where the LMT data is located (default is to look for the DATA_LMT environment variable or the /data_lmt folder")  
     
     parser.add_argument('-b', dest="baseline_order", default = 1, help="Baseline calculation order", type=int)
     
@@ -550,6 +551,17 @@ def rsr_driver_start (clargs):
     hdulist = []
     windows = None
     exclude = None
+    
+    data_lmt_path = "/data_lmt/"
+    res_data_lmt_path = ""
+    if not args.data_lmt:
+        if "DATA_LMT" in os.environ.keys():
+            data_lmt_path = os.environ["DATA_LMT"]
+    else:
+        data_lmt_path=args.data_lmt
+        if "DATA_LMT" in os.environ.keys():
+            res_data_lmt_path = os.environ["DATA_LMT"]
+    os.environ["DATA_LMT"]=data_lmt_path
 
     process_info=OrderedDict()
 
@@ -617,7 +629,7 @@ def rsr_driver_start (clargs):
         ntau_onum = 0
         for chassis in use_chassis:
 
-            filename = rsrFileSearch(ObsNum, chassis, root=args.data_lmt)
+            filename = rsrFileSearch(ObsNum, chassis, root=data_lmt_path)
             
             if filename == "":
                     print ('File not found for chassis %d ObsNumber: %s ' % (chassis,ObsNum))
