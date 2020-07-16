@@ -126,8 +126,8 @@ def rsr_savgolfilter(data_in, freq_in, fwind, exclude=None):
 
 
     if fwind > slen-3:
-        redfactor = 256/fwind
-        awind = (slen)/redfactor
+        redfactor = 256//fwind
+        awind = (slen)//redfactor
         if awind % 2 == 0:
             awind+=1
         print("Requested SGF window %d is too large for valid data scan %d. Changing window to %d" %(fwind, slen, awind ) )
@@ -291,8 +291,22 @@ def update_compspec_sigma(hdu):
     
     nbands = hdu.spectrum.shape[1]
     
+    spectrum = hdu.spectrum.copy()
+    spectrum[hdu.spectrum == spec_blank_value] = numpy.nan
+    if numpy.ma.is_masked(spectrum):
+        spectrum.mask[hdu.spectrum == spec_blank_value] = True
+    
+    hdu_sigma = hdu.sigma.copy()
+    
     for iband in range(nbands):
-        hdu.sigma[0,iband] = numpy.nanstd(hdu.spectrum[0,iband])
+        if numpy.ma.is_masked(spectrum):
+            if spectrum[0,iband].mask.all():
+                hdu_sigma[0,iband] = numpy.nan
+            else:
+                hdu_sigma[0,iband] = numpy.std(spectrum[0,iband])
+        else:
+            hdu_sigma[0,iband] = numpy.nanstd(spectrum[0,iband])
+            
     #Now create a sigma array with the frequencies
     
     compsigma = numpy.zeros(hdu.compfreq.shape)
@@ -306,8 +320,8 @@ def update_compspec_sigma(hdu):
             if hdu.compfreq[i]>= bandlimits[ikey][0][0] and hdu.compfreq[i]<= bandlimits[ikey][0][1]:
                 mindis = numpy.abs(hdu.frequencies[ikey] - hdu.compfreq[i])
                 w = numpy.where(mindis == mindis.min())
-                if numpy.isfinite(hdu.spectrum[0,ikey,w]):
-                    sigma_vals.append(hdu.sigma[0,ikey])
+                if numpy.isfinite(spectrum[0,ikey,w]):
+                    sigma_vals.append(hdu_sigma[0,ikey])
         if len(sigma_vals) > 0:
             sigma_vals = numpy.array(sigma_vals)
             compsigma[i] = numpy.sqrt(numpy.sum(sigma_vals**2)/sigma_vals.shape[0]) 
@@ -469,7 +483,10 @@ def waterfall_plot (hdu, fig=None, thresh=None):
         alphas[w] = 0.3
     
     onm = hdu.header.ObsNum
-    chassis = hdu.header.ChassisNumber[0]
+    try:
+        chassis = hdu.header.ChassisNumber[0]
+    except:
+        chassis = hdu.header.ChassisNumber
     if fig is None:
         fig, axes = plt.subplots (nrows=nreps+1, ncols=1, sharex = True)
         for irep in range(nreps):
@@ -715,7 +732,6 @@ def rsr_driver_start (clargs):
     
     if args.jacknife:
         rand_signs = numpy.sign(numpy.random.uniform(-0.5,0.5,size = len (hdulist)))
-        print rand_signs
         for ihdu, isign in zip(hdulist,rand_signs):
             wvalues = numpy.where(numpy.logical_and(numpy.isfinite(ihdu.spectrum), ihdu.spectrum != spec_blank_value))
             if isign == 0:
