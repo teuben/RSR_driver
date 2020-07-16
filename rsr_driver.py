@@ -31,7 +31,7 @@ import warnings
 import copy
 import shlex
 
-script_version ="0.4.0-rc"
+script_version ="0.5.0-rc"
 
 def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
     """ Locate the RSR files for a given obsnum and chassis number
@@ -446,6 +446,46 @@ def load_obsnum_file(ifile):
         raise ValueError ("Input file does not contain any valid lines")
     return obsnum_list
 
+
+def waterfall_plot (hdu, fig=None, thresh=None):
+    
+    from matplotlib import pyplot as plt
+    
+    nreps = hdu.spectrum.shape[0]
+    
+    if fig is None and nreps == 1:
+        raise RuntimeError ("Averaged spectrum need a previously created figure")
+    
+    plot_data = hdu.spectrum.copy()
+    w = numpy.where(plot_data == spec_blank_value)
+    plot_data[w] = numpy.nan
+    
+    clip_data,_,_ = stats.sigmaclip(plot_data[numpy.isfinite(plot_data)],3)
+    data_std = numpy.std(clip_data)
+    
+    alphas = numpy.ones(plot_data.shape[:2])
+    if thresh:
+        w = numpy.where(hdu.sigma >thresh)
+        alphas[w] = 0.3
+    
+    onm = hdu.header.ObsNum
+    chassis = hdu.header.ChassisNumber[0]
+    if fig is None:
+        fig, axes = plt.subplots (nrows=nreps+1, ncols=1, sharex = True)
+        for irep in range(nreps):
+             for iband in range(6):
+                axes[irep].plot(hdu.frequencies[iband], plot_data[irep,iband], alpha = alphas[irep,iband])
+                axes[irep].set_title("ObsNum %d, Chassis %d, Repeat %d" %(onm,chassis,irep))
+                axes[irep].set_ylim(-5*data_std, 5*data_std)
+    else:
+        axes = fig.axes
+        for iband in range(6):
+            axes[-1].plot(hdu.frequencies[iband], plot_data[0,iband], alpha = alphas[0,iband])
+            axes[-1].set_ylim(axes[0].get_ylim())
+    
+    return fig
+    
+
 def rsr_driver_start (clargs):
     
     """ Routine that calls the DREAMPY package to reduce the data
@@ -481,6 +521,8 @@ def rsr_driver_start (clargs):
     parser.add_argument('-R', '--rfile', help="A file with information of band data to ignore from analysis. \
                         The file must include the obsnum, chassis and band number to exclude separated by comas. One band per row")
     
+    parser.add_argument('-w', '--waterfall-file', dest ="waterfall", help= "Request the driver to produce waterfall plot for each input file", type=str)
+    
     parser.add_argument('--no-corr-cal', dest="corrcal", action="store_false", help="Disable non-linear \
                         correlation correction. NOT RECOMMENDED.")
     parser.add_argument('--no-baseline-sub', dest="nosub", action="store_false", help="Disable subtraction of \
@@ -507,7 +549,6 @@ def rsr_driver_start (clargs):
         Obslist = tmplist
 
     if args.simulate:
-        
         if len(args.simulate) != 3:
             raise Exception("Incorrect information provided to simulation function. Need 3 parameters separated by spaces")
         args.simulate[-1] = vel2dfreq(args.simulate[1], args.simulate[-1])
@@ -540,6 +581,17 @@ def rsr_driver_start (clargs):
                 remove_keys[rkey].append(int(rband))
 
     alltau = []
+    waterpdf = None
+    backend = None
+    if args.waterfall:
+        import matplotlib
+        backend= matplotlib.get_backend()
+        matplotlib.use("pdf")
+        from matplotlib.backends.backend_pdf import PdfPages
+        waterpdf = PdfPages(args.waterfall)
+        
+
+    info_obsnum=""
 
     for ObsNum in Obslist:
         nfiles_per_onum = 0
@@ -569,6 +621,8 @@ def rsr_driver_start (clargs):
                 print ("Cannot proces file %s. This is probably an incomplete observation" % filename)
                 nc.close()
                 continue
+            
+            info_obsnum += "%d_%d," % (ObsNum, chassis) 
             
             if windows is None:
                 windows = setup_default_windows(nc)
@@ -600,12 +654,20 @@ def rsr_driver_start (clargs):
             
             nc.hdu.baseline(order = args.baseline_order, subtract=True, windows=windows)
             
+            if not waterpdf is None:
+                wfig = waterfall_plot(nc.hdu,thresh=args.rthr)
+            
             if args.rthr:
-                nc.hdu.average_all_repeats(weight='sigma', threshold_sigma=float(args.rthr))
+                nc.hdu.average_all_repeats(weight='sigma', threshold_sigma=args.rthr)
             else:
                 nc.hdu.average_all_repeats(weight='sigma')
             if args.filter:
                 rebaseline(nc, farg= args.filter,exclude=exclude)
+            
+            if not waterpdf is None:
+                waterfall_plot(nc.hdu, wfig, thresh=args.cthresh)
+                waterpdf.savefig(wfig)
+                
 
 
 
@@ -624,10 +686,16 @@ def rsr_driver_start (clargs):
             real_tint += tint_per_onum/nfiles_per_onum
         if ntau_onum >0:
             alltau.append(tau_onum/ntau_onum)
+    
     avgtau = numpy.mean(alltau)
 
     if len(hdulist) == 0:
         raise FileNotFoundError("No RSR data files were found. Check the -d parameter or the DATA_LMT environment variable")
+    
+    add_info (process_info, "Input Observations", info_obsnum)
+
+    if not waterpdf is None:
+        waterpdf.close()
 
     add_info(process_info, "Integration Time", real_tint, "s")
     add_info(process_info, "Average Opacity (220GHz)", numpy.around(avgtau,2))
@@ -682,7 +750,17 @@ def rsr_driver_start (clargs):
         outfile = args.output
     out_array = numpy.array ([hdu.compfreq,hdu.compspectrum.squeeze(), compsigma]).T
     numpy.savetxt(outfile, out_array, header = rsr_output_header(hdu,process_info))
-    hdu.write_spectra_to_ascii(outfile.replace(".txt", "_bandspec.txt"))
+    bspec_outfilename = outfile.replace(".txt", "_bandspec.txt")
+    hdu.write_spectra_to_ascii(bspec_outfilename)
+    #Prepend the header to the bandspec output file
+    bspec_file = open(bspec_outfilename)
+    bspec_lines = bspec_file.readlines()
+    bspec_lines.insert(0,rsr_output_header(hdu,process_info))
+    bspec_file.close()
+    bspec_file = open(bspec_outfilename,"w")
+    bspec_file.writelines(bspec_lines)
+    bspec_file.close()
+    
 
     if args.doplot:
         try:
