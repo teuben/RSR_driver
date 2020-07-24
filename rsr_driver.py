@@ -31,7 +31,7 @@ import warnings
 import copy
 import shlex
 
-script_version ="0.5.0-rc"
+script_version ="0.5.5-rc"
 
 def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
     """ Locate the RSR files for a given obsnum and chassis number
@@ -138,7 +138,7 @@ def rsr_savgolfilter(data_in, freq_in, fwind, exclude=None):
     data_filter = data_in.copy()
     freq_filter = freq_in.copy()
     spline_weight = numpy.ones(slen)
-    #data_filter -=data_filter.mean()
+
     if not exclude is None:
         for ifreq, iwidth in zip(exclude['freqs'], exclude['widths']):
             if ifreq >= freq_filter.min() and ifreq<=freq_filter.max():
@@ -281,7 +281,6 @@ def insert_sim(nc, A,f_mu, f_width):
     for iband in range(nbands):
         if f_mu > nc.hdu.frequencies[iband].min() and f_mu < nc.hdu.frequencies[iband].max():
             gmodel = freq_gaussian(nc.hdu.frequencies[iband], A, f_mu, f_width)
-            #import ipdb; ipdb.set_trace()
             for irep in range(nreps):
                 nc.hdu.spectrum[irep,iband]+=gmodel
     
@@ -591,7 +590,7 @@ def rsr_driver_start (clargs):
                           order in range from 0 to 3. Check the input of -b parameter" % args.baseline_order)
     else:
         add_info(process_info, "Polynomial Baseline Order", args.baseline_order)
-    add_info(process_info, "Linear Correction Applied", args.corrcal)
+    
     if args.chassis:
         if len(args.chassis) > 4:
             raise ValueError ("Incorrect number of chassis supplied. RSR only have four chassis")
@@ -810,7 +809,6 @@ def rsr_driver_start (clargs):
         plt.xlabel('Frequency (GHz)')
         plt.ylabel('TA* (K)')
         plt.suptitle("%s Tint=%f hrs " %(hdu.header.SourceName, real_tint/3600.0))
-        plt.show()
         plb = plt.figure()
         for i in range(hdu.spectrum.shape[1]):
             plt.step(hdu.frequencies[i], hdu.spectrum[0,i,:], where="mid", label = "Band %d"%i)
