@@ -138,7 +138,7 @@ def rsr_savgolfilter(data_in, freq_in, fwind, exclude=None):
     data_filter = data_in.copy()
     freq_filter = freq_in.copy()
     spline_weight = numpy.ones(slen)
-    data_filter -=data_filter.mean()
+    #data_filter -=data_filter.mean()
     if not exclude is None:
         for ifreq, iwidth in zip(exclude['freqs'], exclude['widths']):
             if ifreq >= freq_filter.min() and ifreq<=freq_filter.max():
@@ -146,12 +146,18 @@ def rsr_savgolfilter(data_in, freq_in, fwind, exclude=None):
                                                     freq_filter <= ifreq+iwidth))
                 wnex = numpy.where(numpy.logical_or(freq_filter < ifreq-iwidth,
                                                     freq_filter > ifreq+iwidth))
-                spline_weight[wex] = 0.7
+                spline_weight[wex] = 0.
 
-                dinterp = interpolate.UnivariateSpline(freq_filter, data_filter, w=spline_weight, s=0.5)#,s =len(data_filter)/4)
+                if freq_filter[-1] < freq_filter[0]:
+                    dinterp = interpolate.UnivariateSpline(freq_filter[wnex][::-1], data_filter[wnex][::-1])#,s =len(data_filter)/4)
+                else:
+                    dinterp = interpolate.UnivariateSpline(freq_filter[wnex], data_filter[wnex])#,s =len(data_filter)/4)
+                
+                data_filter[wex] = dinterp(freq_filter[wex])
+                
                 print ("SGF: Removing interval {} to {} GHz".format(ifreq-iwidth,ifreq+iwidth))
         
-    data_filter -= signal.savgol_filter(data_filter,awind,3)
+    data_filter = data_in - signal.savgol_filter(data_filter,awind,3)
     return data_filter
 
 def rsr_notchfilter(freq_in, data_in, sigma):
@@ -540,9 +546,7 @@ def rsr_driver_start (clargs):
                         The file must include the obsnum, chassis and band number to exclude separated by comas. One band per row")
     
     parser.add_argument('-w', '--waterfall-file', dest ="waterfall", help= "Request the driver to produce waterfall plot for each input file", type=str)
-    
-    parser.add_argument('--no-corr-cal', dest="corrcal", action="store_false", help="Disable non-linear \
-                        correlation correction. NOT RECOMMENDED.")
+
     parser.add_argument('--no-baseline-sub', dest="nosub", action="store_false", help="Disable subtraction of \
                         polinomial baseline. NOT RECOMMENDED.")
 
@@ -645,7 +649,7 @@ def rsr_driver_start (clargs):
                             
         
             try: 
-            	nc.hdu.process_scan(corr_linear=args.corrcal) 
+            	nc.hdu.process_scan(corr_linear=True) 
             except:
                 print ("Cannot proces file %s. This is probably an incomplete observation" % filename)
                 nc.close()
@@ -702,7 +706,7 @@ def rsr_driver_start (clargs):
 
             integ = 2*int(nc.hdu.header.get('Bs.NumRepeats'))*int(nc.hdu.header.get('Bs.TSamp'))
             itau = nc.hdu.header.get('Radiometer.Tau')
-            if itau > 0.0:
+            if itau > 0.0 and numpy.isfinite(itau):
                 tau_onum+=itau
                 ntau_onum+=1
             tint += integ
@@ -758,7 +762,7 @@ def rsr_driver_start (clargs):
     
 
     if args.filter:
-        rebaseline(hdu,farg=args.filter)
+        rebaseline(hdu,farg=args.filter, exclude=exclude)
 
     if args.notch:
         rebaseline(hdu,farg=args.notch,notch=True)
@@ -766,11 +770,10 @@ def rsr_driver_start (clargs):
     if args.smooth > 0:
         add_info(process_info, "Smoothing Channels", args.smooth, "")
         hdu.smooth(nchan=args.smooth)
+        
     hdu.make_composite_scan()
-    
     compsigma = update_compspec_sigma(hdu)
-
-
+    
     add_info(process_info, "RSR driver cmd", " ".join(clargs))
     if args.output == "":
         outfile = "%s_rsr_spectrum.txt"%source
@@ -791,20 +794,34 @@ def rsr_driver_start (clargs):
     
 
     if args.doplot:
-        try:
-            from dreampy3.redshift.plots import RedshiftPlot
-        except ImportError:
-            from dreampy.redshift.plots import RedshiftPlot
-        pl1 = RedshiftPlot()
-        pl = RedshiftPlot()
-        pl1.plot_spectra(hdu)
-        pl.clear()
-        pl.plot(hdu.compfreq, hdu.compspectrum[0,:], linestyle = 'steps-mid')
-        pl.set_xlim(72.5, 111.5)
-        pl.set_xlabel('Frequency (GHz)')
-        pl.set_ylabel('TA* (K)')
-        pl.set_subplot_title("%s Tint=%f hrs " %(hdu.header.SourceName, real_tint/3600.0))
-
+        if not backend is None:
+            print ("Attempt to switch backend to %s"%backend)
+            try:
+                matplotlib.use(backend, warn=False , force=True)
+            except TypeError:
+                matplotlib.use(backend, force=True)
+            
+        from matplotlib import pyplot as plt
+        
+        pl = plt.figure()
+        plt.ion()
+        plt.step(hdu.compfreq, hdu.compspectrum[0,:], where="mid")
+        plt.xlim(72.5, 111.5)
+        plt.xlabel('Frequency (GHz)')
+        plt.ylabel('TA* (K)')
+        plt.suptitle("%s Tint=%f hrs " %(hdu.header.SourceName, real_tint/3600.0))
+        plt.show()
+        plb = plt.figure()
+        for i in range(hdu.spectrum.shape[1]):
+            plt.step(hdu.frequencies[i], hdu.spectrum[0,i,:], where="mid", label = "Band %d"%i)
+        plt.legend(loc="best")
+        plt.xlim(72.5, 111.5)
+        plt.xlabel('Frequency (GHz)')
+        plt.ylabel('TA* (K)')
+        plt.suptitle("%s Tint=%f hrs " %(hdu.header.SourceName, real_tint/3600.0))
+        plt.show()
+        
+        
 if __name__ == "__main__":
     """ Simple wrapper to process RSR spectra
     
