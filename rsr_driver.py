@@ -451,6 +451,9 @@ def load_obsnum_file(ifile):
         for iline in dfile.readlines():
             nline += 1
             sline = iline.strip().split("-")
+
+            if sline[0][0] == "#":
+                continue
             if len(sline)==1:
                 onum = int(sline[0])
                 obsnum_list.append(onum)
