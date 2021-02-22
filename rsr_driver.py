@@ -60,7 +60,7 @@ def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
 
     return ""
 
-def rsr_output_header(hdu, infodict):
+def rsr_output_header(hdu, infodict, add_comment = False):
     """ Returns a string with useful information for output spectrum
     
         Args:
@@ -78,31 +78,37 @@ def rsr_output_header(hdu, infodict):
     sigma = hdu.sigma.copy().squeeze()
 
     cdate = date.today()
-    string = "------------Redshift Receiver Spectrum---------\n"
-    string +="Telescope: Large Millimeter Telescope\n"
-    string +="Source: %s\n" % hdu.header.SourceName
-    string +="Source RA: %s\n" % hdu.header.RA
-    string +="Source DEC: %s\n" % hdu.header.DEC
-    string +="Pipeline version (DREAMPY): %s\n" % dreampy.version()
-    string +="Driver script version: %s\n" % script_version 
-    string +="Date of Reduction (YYYY-MM-DD): %s\n"%cdate.strftime("%Y-%b-%d")
-    string +="Frequency Units: GHz\n"
-    string +="Spectrum Units: K (T_A)\n"
-    string +="Band intervals (GHz):"
+    
+    ctag = ""
+    if add_comment:
+        ctag = "# "
+    
+    
+    string = ctag + "------------Redshift Receiver Spectrum---------\n"
+    string += ctag + "Telescope: Large Millimeter Telescope\n"
+    string += ctag + "Source: %s\n" % hdu.header.SourceName
+    string += ctag + "Source RA: %s\n" % hdu.header.RA
+    string += ctag + "Source DEC: %s\n" % hdu.header.DEC
+    string += ctag + "Pipeline version (DREAMPY): %s\n" % dreampy.version()
+    string += ctag + "Driver script version: %s\n" % script_version 
+    string += ctag + "Date of Reduction (YYYY-MM-DD): %s\n"%cdate.strftime("%Y-%b-%d")
+    string += ctag + "Frequency Units: GHz\n"
+    string += ctag + "Spectrum Units: K (T_A)\n"
+    string += ctag + "Band intervals (GHz):"
     for i in range(sigma.shape[0]):
         wvalid = numpy.where(numpy.isfinite(hdu.spectrum[0,i]))
         if len(wvalid[0]) > 0:
             string +="(%.3f-%.3f)," %(hdu.frequencies[i,wvalid].min(), hdu.frequencies[i,wvalid].max())
     #string+= "(%.3f-%.3f)\n" %(hdu.frequencies[-1].min(), hdu.frequencies[-1].max())
     string = string[:-1]+"\n"
-    string +="Sigma per band: "
+    string += ctag + "Sigma per band: "
     for i in range(sigma.shape[0]):
         string +="%f," %sigma[i]
     #string += "%f\n"%sigma[-1]
     string=string[:-1]+"\n"
     for ikey in infodict.keys():
-        string += "{}: {} {}\n".format(ikey, infodict[ikey]["value"], infodict[ikey]["units"])
-    string +="------------------------------------------------\n"
+        string += ctag + "{}: {} {}\n".format(ikey, infodict[ikey]["value"], infodict[ikey]["units"])
+    string +=ctag +  "------------------------------------------------\n"
     
     return string
 
@@ -788,7 +794,7 @@ def rsr_driver_start (clargs):
     #Prepend the header to the bandspec output file
     bspec_file = open(bspec_outfilename)
     bspec_lines = bspec_file.readlines()
-    bspec_lines.insert(0,rsr_output_header(hdu,process_info))
+    bspec_lines.insert(0,rsr_output_header(hdu,process_info, add_comment=True))
     bspec_file.close()
     bspec_file = open(bspec_outfilename,"w")
     bspec_file.writelines(bspec_lines)
