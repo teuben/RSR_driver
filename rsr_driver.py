@@ -48,7 +48,7 @@ def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
           if the file is not found.
     """
     if chassis < 0 or chassis >3:
-            print ("Error no chassis %d" % chassis)
+            print("Error no chassis %d" % chassis)
             return ""
 
     chassisDir = "%s/RedshiftChassis%d/"%(root,chassis)
@@ -162,7 +162,7 @@ def rsr_savgolfilter(data_in, freq_in, fwind, exclude=None):
                 
                 data_filter[wex] = dinterp(freq_filter[wex])
                 
-                print ("SGF: Removing interval {} to {} GHz".format(ifreq-iwidth,ifreq+iwidth))
+                print("SGF: Removing interval {} to {} GHz".format(ifreq-iwidth,ifreq+iwidth))
         
     data_filter = data_in - signal.savgol_filter(data_filter,awind,3)
     return data_filter
@@ -237,7 +237,7 @@ def rebaseline (nc, farg=None, exclude = None, notch = False):
                 sec_end.append(isample)
                 onScan = False
         nscans = len(sec_start)
-        print ("Found %d scans on band %s on obs %s"%(nscans,iband, hdu.header.obs_string()))
+        print("Found %d scans on band %s on obs %s"%(nscans,iband, hdu.header.obs_string()))
         for iscan in range(nscans):
             
             if not notch:
@@ -402,7 +402,7 @@ def setup_default_windows (nc):
     for i in range(nbands):
         windows[i] = [(hdu.frequencies[i].min(),hdu.frequencies[i].max() )]
     
-    print ("Generating default baseline windows values to include all data", windows)
+    print("Generating default baseline windows values to include all data", windows)
     
     return windows
 
@@ -469,7 +469,7 @@ def load_obsnum_file(ifile):
                 enum = int(sline[-1])
                 obsnum_list.extend(range(snum,enum+1))
             else:
-                print ("Input file on line %d does not contain a valid ObsNum or ObsNume range. Ignoring")
+                print("Input file on line %d does not contain a valid ObsNum or ObsNume range. Ignoring")
 
     if len(obsnum_list) == 0:
         raise ValueError ("Input file does not contain any valid lines")
@@ -551,7 +551,7 @@ def rsr_driver_start (clargs):
 
     parser.add_argument('-c', dest= "chassis", nargs='+', help = "List of chassis to use in reduction. Default is the four chassis")
 
-    parser.add_argument('-B', '--badlags', help="A bad lags file with list of (chassis,board,channel) tuples as produced by seed_bad_channels")
+    parser.add_argument('-B', '--badlags', help="A bad lags file with list of (chassis,board,channel) tuples as produced by seek_bad_channels")
     
     parser.add_argument('-R', '--rfile', help="A file with information of band data to ignore from analysis. \
                         The file must include the obsnum, chassis and band number to exclude separated by comas. One band per row")
@@ -653,7 +653,7 @@ def rsr_driver_start (clargs):
             filename = rsrFileSearch(ObsNum, chassis, root=data_lmt_path)
             
             if filename == "":
-                    print ('File not found for chassis %d ObsNumber: %s ' % (chassis,ObsNum))
+                    print('File not found for chassis %d ObsNumber: %s ' % (chassis,ObsNum))
                     continue
                     
 
@@ -668,7 +668,7 @@ def rsr_driver_start (clargs):
             try: 
             	nc.hdu.process_scan(corr_linear=True) 
             except:
-                print ("Cannot proces file %s. This is probably an incomplete observation" % filename)
+                print("Cannot proces file %s. This is probably an incomplete observation" % filename)
                 nc.close()
                 continue
             
@@ -699,7 +699,7 @@ def rsr_driver_start (clargs):
                 if rk in remove_keys.keys():
                     for iband in remove_keys[rk]:
                         nc.hdu.blank_frequencies ({iband:[(windows[iband][0][0],windows[iband][0][-1]),]})
-                        print ("Remove band %d from ObsNum %d Chassis %d" % (iband, ObsNum, chassis))
+                        print("Remove band %d from ObsNum %d Chassis %d" % (iband, ObsNum, chassis))
 
             
             nc.hdu.baseline(order = args.baseline_order, subtract=True, windows=windows)
@@ -812,7 +812,7 @@ def rsr_driver_start (clargs):
 
     if args.doplot:
         if not backend is None:
-            print ("Attempt to switch backend to %s"%backend)
+            print("Attempt to switch backend to %s"%backend)
             try:
                 matplotlib.use(backend, warn=False , force=True)
             except TypeError:
