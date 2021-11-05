@@ -31,7 +31,8 @@ import warnings
 import copy
 import shlex
 
-script_version ="0.5.5-rc"
+script_version ="0.6.0-pjt"
+
 
 def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
     """ Locate the RSR files for a given obsnum and chassis number
@@ -292,7 +293,7 @@ def insert_sim(nc, A,f_mu, f_width):
     
 
 def update_compspec_sigma(hdu):
-    """ Updates the header sigma array with current standrard deviation values per band
+    """ Updates the header sigma array with current standard deviation values per band
     
         Args:
            hdu (object): Header Data Unit processed from a RedshiftNetCDFFile
@@ -549,6 +550,8 @@ def rsr_driver_start (clargs):
 
 
     parser.add_argument('-c', dest= "chassis", nargs='+', help = "List of chassis to use in reduction. Default is the four chassis")
+
+    parser.add_argument('-B', '--badlags', help="A bad lags file with list of (chassis,board,channel) tuples as produced by seed_bad_channels")
     
     parser.add_argument('-R', '--rfile', help="A file with information of band data to ignore from analysis. \
                         The file must include the obsnum, chassis and band number to exclude separated by comas. One band per row")
@@ -620,6 +623,12 @@ def rsr_driver_start (clargs):
                 if not rkey in remove_keys.keys():
                     remove_keys[rkey] = []
                 remove_keys[rkey].append(int(rband))
+
+    # PJT hack (either way, this will reset the lags if you don't supply them)
+    if args.badlags:
+        dreampy.badlags(args.badlags)
+    else:
+        dreampy.badlags(None)
 
     alltau = []
     waterpdf = None
