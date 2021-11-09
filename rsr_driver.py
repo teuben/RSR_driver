@@ -618,6 +618,8 @@ def rsr_driver_start (clargs):
         remove_keys ={}
         with open (args.rfile) as rfile:
             for iline in rfile.readlines():
+                if iline[0] == '#':
+                    continue
                 ronum, rchassis, rband = iline.split(",")
                 rkey = rpattern %(int (ronum),int(rchassis))
                 if not rkey in remove_keys.keys():
