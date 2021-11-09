@@ -615,9 +615,13 @@ def rsr_driver_start (clargs):
     remove_keys = None
     rpattern = "O%06d_c%02d"
     if args.rfile:
+        print("Processing rfile %s" % args.rfile)
         remove_keys ={}
         with open (args.rfile) as rfile:
             for iline in rfile.readlines():
+                if iline[0] == '#':
+                    continue
+                #  warning:   although called band, it's really board
                 ronum, rchassis, rband = iline.split(",")
                 rkey = rpattern %(int (ronum),int(rchassis))
                 if not rkey in remove_keys.keys():
@@ -699,7 +703,7 @@ def rsr_driver_start (clargs):
                 if rk in remove_keys.keys():
                     for iband in remove_keys[rk]:
                         nc.hdu.blank_frequencies ({iband:[(windows[iband][0][0],windows[iband][0][-1]),]})
-                        print("Remove band %d from ObsNum %d Chassis %d" % (iband, ObsNum, chassis))
+                        print("Remove board %d from ObsNum %d Chassis %d" % (iband, ObsNum, chassis))
 
             
             nc.hdu.baseline(order = args.baseline_order, subtract=True, windows=windows)
