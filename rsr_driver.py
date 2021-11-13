@@ -621,8 +621,9 @@ def rsr_driver_start (clargs):
             for iline in rfile.readlines():
                 if iline[0] == '#':
                     continue
+                # @todo    skip blank(ish) lines
                 #  warning:   although called band, it's really board
-                ronum, rchassis, rband = iline.split(",")
+                ronum, rchassis, rband = iline.split("#")[0].split(",")
                 rkey = rpattern %(int (ronum),int(rchassis))
                 if not rkey in remove_keys.keys():
                     remove_keys[rkey] = []
