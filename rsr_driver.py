@@ -704,7 +704,8 @@ def rsr_driver_start (clargs):
 
                 
             # @todo why do chassis (2,3) need this blanked???
-            if chassis in(2,3): 
+            if False:
+                if chassis in(2,3): 
                     nc.hdu.blank_frequencies( {3: [(95.5,97.0),]} )
             
             if not remove_keys is None:
