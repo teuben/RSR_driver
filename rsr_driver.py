@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-""" A script to easily configure the Redshift Search Receiver (RSR) d
+""" A script to easily configure the Redshift Search Receiver (RSR)
     data reduction
  (C) 2019 Large Millimeter Telescope (LMT), Mexico
  Released under GNU Public License (GPL v3)
@@ -21,7 +21,8 @@ from datetime import date
 from scipy import signal
 from scipy import interpolate
 from scipy import stats
-from collections import OrderedDict 
+from collections import OrderedDict
+import re
 import sys
 import numpy
 import glob
@@ -619,12 +620,16 @@ def rsr_driver_start (clargs):
         remove_keys ={}
         with open (args.rfile) as rfile:
             for iline in rfile.readlines():
-                if iline[0] == '#':
+                if iline[0] == '#':            # remove comment lines
                     continue
-                if iline.isspace():
+                if iline.isspace():            # remove lines with just whitespace
                     continue
                 #  warning:   although called band, it's really board
-                ronum, rchassis, rband = iline.split("#")[0].split(",")
+                if False:
+                    # split on space and comma
+                    ronum, rchassis, rband = re.split("\s|,", iline.split("#")[0].strip())
+                else:
+                    ronum, rchassis, rband = iline.split("#")[0].split(",")
                 rkey = rpattern %(int (ronum),int(rchassis))
                 if not rkey in remove_keys.keys():
                     remove_keys[rkey] = []
@@ -696,7 +701,9 @@ def rsr_driver_start (clargs):
             
             if args.simulate:
                 insert_sim(nc, *args.simulate)
-            
+
+                
+            # @todo why do chassis (2,3) need this blanked???
             if chassis in(2,3): 
                     nc.hdu.blank_frequencies( {3: [(95.5,97.0),]} )
             
@@ -851,4 +858,5 @@ if __name__ == "__main__":
             rsr_driver -h
     """
 
+    print("rsr_driver %s" % script_version)
     rsr_driver_start(sys.argv[1:]) 
