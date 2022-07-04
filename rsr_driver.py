@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#! /usr/bin/env python
 # -*- coding: utf-8 -*-
 
 """ A script to easily configure the Redshift Search Receiver (RSR)
@@ -32,7 +32,7 @@ import warnings
 import copy
 import shlex
 
-script_version ="0.6.0-pjt"
+script_version ="0.6.1-pjt"
 
 
 def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
@@ -477,7 +477,7 @@ def load_obsnum_file(ifile):
     return obsnum_list
 
 
-def waterfall_plot (hdu, fig=None, thresh=None):
+def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None):
     
     from matplotlib import pyplot as plt
     
@@ -509,12 +509,16 @@ def waterfall_plot (hdu, fig=None, thresh=None):
              for iband in range(6):
                 axes[irep].plot(hdu.frequencies[iband], plot_data[irep,iband], alpha = alphas[irep,iband])
                 axes[irep].set_ylim(-5*data_std, 5*data_std)
+                if plot_freq != None:
+                    axes[irep].set_xlim(plot_freq[0], plot_freq[1])
              axes[irep].text(hdu.frequencies.mean(),3*data_std,"ObsNum %d, Chassis %d, Repeat %d" %(onm,chassis,irep), ha="center")
     else:
         axes = fig.axes
         for iband in range(6):
             axes[-1].plot(hdu.frequencies[iband], plot_data[0,iband], alpha = alphas[0,iband])
             axes[-1].set_ylim(axes[0].get_ylim())
+            if plot_freq != None:
+                axes[-1].set_xlim(plot_freq[0], plot_freq[1])
         axes[-1].text(hdu.frequencies.mean(),3.0/5.0*axes[0].get_ylim()[1],"ObsNum %d, Chassis %d, Averaged" %(onm,chassis), ha="center")
     
     return fig
@@ -536,7 +540,7 @@ def rsr_driver_start (clargs):
     parser.add_argument('-o','--output', dest="output", default="", help="Output file name containing the spectrum")
     parser.add_argument('-f','--filter', dest="filter", default=0, help="Apply Savitzky-Golay filter (SGF) to reduce large scale trends in the spectrum. Must be an odd integer. This value represent the number of channels used to aproximate the baseline. Recomended values are larger than 21. Default is to not apply the SGF", type=int)
     parser.add_argument('-s','--smothing', dest ="smooth", default=0, type=int, help="Number of channels of a boxcar lowpass filter applied  to the coadded spectrum. Default is to no apply filter")
-    parser.add_argument('-r','--repeat_thr', dest = "rthr", type = float,help="Thershold sigma value when averaging single observations repeats")  
+    parser.add_argument('-r','--repeat_thr', dest = "rthr", type = float,help="Threshold sigma value when averaging single observations repeats")  
     parser.add_argument('-n', '--notch_sigma', dest = "notch", help="Sigma cut for notch filter to eliminate large frecuency oscillations in spectrum. Needs to be run with -f option.", type =float)
 
     parser.add_argument('--simulate', nargs='+', help="Insert a simulated line into spectrum. The format is a list or a set of three elements Amplitude central_frequency line_velocity_width.", type = float)
@@ -559,8 +563,7 @@ def rsr_driver_start (clargs):
     
     parser.add_argument('-w', '--waterfall-file', dest ="waterfall", help= "Request the driver to produce waterfall plot for each input file", type=str)
 
-    parser.add_argument('--no-baseline-sub', dest="nosub", action="store_false", help="Disable subtraction of \
-                        polinomial baseline. NOT RECOMMENDED.")
+    parser.add_argument('--no-baseline-sub', dest="nosub", action="store_false", help="Disable subtraction of polynomial baseline. NOT RECOMMENDED.")
 
     args = parser.parse_args(clargs)
 
@@ -584,8 +587,8 @@ def rsr_driver_start (clargs):
     tint = 0.0
     real_tint = 0.0
     source = None
-    
-    
+    plot_freq = [72.5, 111.5]    # or pick None to auto-scale
+        
     Obslist = load_obsnum_file(args.obslist)
     
     if numpy.ndim(Obslist)==0:
@@ -612,7 +615,7 @@ def rsr_driver_start (clargs):
         use_chassis = tuple (numpy.unique(use_chassis))
     else:
         use_chassis = tuple  ((0,1,2,3))
-        
+
     remove_keys = None
     rpattern = "O%06d_c%02d"
     if args.rfile:
@@ -631,11 +634,12 @@ def rsr_driver_start (clargs):
                 else:
                     ronum, rchassis, rband = iline.split("#")[0].split(",")
                 rkey = rpattern %(int (ronum),int(rchassis))
+                print("PJT rfile",ronum,rchassis,rband,rkey)
                 if not rkey in remove_keys.keys():
                     remove_keys[rkey] = []
                 remove_keys[rkey].append(int(rband))
 
-    # PJT hack (either way, this will reset the lags if you don't supply them)
+    # PJT hack (either way, this will reset the lags in ~/.dreampy/dreampyrc if you don't supply them)
     if args.badlags:
         dreampy.badlags(args.badlags)
     else:
@@ -670,16 +674,16 @@ def rsr_driver_start (clargs):
 
             nc = RedshiftNetCDFFile(filename)
             if nc.hdu.header.ObsPgm != 'Bs':
+                    print('Skipping %s with ObsPgm = %s' % (filename,nc.hdu.header.ObsPgm))
                     nc.close()
                     continue
             if source is None:
                     source = nc.hdu.header.SourceName
-                            
         
             try: 
             	nc.hdu.process_scan(corr_linear=True) 
             except:
-                print("Cannot proces file %s. This is probably an incomplete observation" % filename)
+                print("Cannot proces %s. This is probably an incomplete observation" % filename)
                 nc.close()
                 continue
             
@@ -719,7 +723,7 @@ def rsr_driver_start (clargs):
             nc.hdu.baseline(order = args.baseline_order, subtract=True, windows=windows)
             
             if not waterpdf is None:
-                wfig = waterfall_plot(nc.hdu,thresh=args.rthr)
+                wfig = waterfall_plot(nc.hdu,thresh=args.rthr,plot_freq=plot_freq)
             
             if args.rthr:
                 nc.hdu.average_all_repeats(weight='sigma', threshold_sigma=args.rthr)
@@ -729,7 +733,7 @@ def rsr_driver_start (clargs):
                 rebaseline(nc, farg= args.filter,exclude=exclude)
             
             if not waterpdf is None:
-                waterfall_plot(nc.hdu, wfig, thresh=args.cthresh)
+                waterfall_plot(nc.hdu, wfig, thresh=args.cthresh,plot_freq=plot_freq)
                 waterpdf.savefig(wfig)
                 
 
@@ -837,7 +841,8 @@ def rsr_driver_start (clargs):
         pl = plt.figure()
         plt.ion()
         plt.step(hdu.compfreq, hdu.compspectrum[0,:], where="mid")
-        plt.xlim(72.5, 111.5)
+        if plot_freq != None:
+            plt.xlim(plot_freq[0], plot_freq[1])
         plt.xlabel('Frequency (GHz)')
         plt.ylabel('TA* (K)')
         plt.suptitle("%s Tint=%f hrs " %(hdu.header.SourceName, real_tint/3600.0))
@@ -845,7 +850,8 @@ def rsr_driver_start (clargs):
         for i in range(hdu.spectrum.shape[1]):
             plt.step(hdu.frequencies[i], hdu.spectrum[0,i,:], where="mid", label = "Band %d"%i)
         plt.legend(loc="best")
-        plt.xlim(72.5, 111.5)
+        if plot_freq != None:
+            plt.xlim(plot_freq[0], plot_freq[1])
         plt.xlabel('Frequency (GHz)')
         plt.ylabel('TA* (K)')
         plt.suptitle("%s Tint=%f hrs " %(hdu.header.SourceName, real_tint/3600.0))
