@@ -32,7 +32,7 @@ import warnings
 import copy
 import shlex
 
-script_version ="0.6.1-pjt"
+script_version ="0.6.2-pjt"
 
 
 def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
@@ -492,6 +492,9 @@ def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None):
     
     clip_data,_,_ = stats.sigmaclip(plot_data[numpy.isfinite(plot_data)],3)
     data_std = numpy.std(clip_data)
+    if data_std <= 0.0 or numpy.isnan(data_std):
+        print("Warning: all data clipped. ")
+        data_std = 1.0
     
     alphas = numpy.ones(plot_data.shape[:2])
     if thresh:
