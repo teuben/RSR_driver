@@ -32,7 +32,7 @@ import warnings
 import copy
 import shlex
 
-script_version ="0.6.2-pjt"
+script_version ="0.6.3-pjt"
 
 
 def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
@@ -741,7 +741,6 @@ def rsr_driver_start (clargs):
                 
 
 
-
             integ = 2*int(nc.hdu.header.get('Bs.NumRepeats'))*int(nc.hdu.header.get('Bs.TSamp'))
             itau = nc.hdu.header.get('Radiometer.Tau')
             if itau > 0.0 and numpy.isfinite(itau):
@@ -768,6 +767,7 @@ def rsr_driver_start (clargs):
     if not waterpdf is None:
         waterpdf.close()
 
+    # @todo   real_tint differs from Header.Dcs.IntegrationTime , in one case 322 vs. 307sec
     add_info(process_info, "Integration Time", real_tint, "s")
     add_info(process_info, "Average Opacity (220GHz)", numpy.around(avgtau,2))
     if args.filter >0:
@@ -832,6 +832,8 @@ def rsr_driver_start (clargs):
     
 
     if args.doplot:
+        # board number for given band
+        board = [0,2,1,3,5,4]
         if not backend is None:
             print("Attempt to switch backend to %s"%backend)
             try:
@@ -842,7 +844,8 @@ def rsr_driver_start (clargs):
         from matplotlib import pyplot as plt
         
         pl = plt.figure()
-        plt.ion()
+        #plt.ion()
+        #plt.ioff()
         plt.step(hdu.compfreq, hdu.compspectrum[0,:], where="mid")
         if plot_freq != None:
             plt.xlim(plot_freq[0], plot_freq[1])
@@ -851,14 +854,16 @@ def rsr_driver_start (clargs):
         plt.suptitle("%s Tint=%f hrs " %(hdu.header.SourceName, real_tint/3600.0))
         plb = plt.figure()
         for i in range(hdu.spectrum.shape[1]):
-            plt.step(hdu.frequencies[i], hdu.spectrum[0,i,:], where="mid", label = "Band %d"%i)
+            plt.step(hdu.frequencies[i], hdu.spectrum[0,i,:], where="mid", label = "Band %d Board %d"%(i,board[i]))
         plt.legend(loc="best")
         if plot_freq != None:
             plt.xlim(plot_freq[0], plot_freq[1])
         plt.xlabel('Frequency (GHz)')
         plt.ylabel('TA* (K)')
         plt.suptitle("%s Tint=%f hrs " %(hdu.header.SourceName, real_tint/3600.0))
-        plt.show()
+        plt.savefig('rsr.driver.png')
+        print("Written rsr.driver.png")
+        #plt.show()
         
         
 if __name__ == "__main__":
