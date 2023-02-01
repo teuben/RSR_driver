@@ -32,7 +32,7 @@ import warnings
 import copy
 import shlex
 
-script_version ="0.6.3-pjt"
+script_version ="0.6.5-pjt"
 
 
 def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
@@ -477,7 +477,7 @@ def load_obsnum_file(ifile):
     return obsnum_list
 
 
-def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None):
+def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None, kscale=1000):
     
     from matplotlib import pyplot as plt
     
@@ -510,15 +510,15 @@ def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None):
         fig, axes = plt.subplots (nrows=nreps+1, ncols=1, sharex = True)
         for irep in range(nreps):
              for iband in range(6):
-                axes[irep].plot(hdu.frequencies[iband], plot_data[irep,iband], alpha = alphas[irep,iband])
-                axes[irep].set_ylim(-5*data_std, 5*data_std)
+                axes[irep].plot(hdu.frequencies[iband], kscale*plot_data[irep,iband], alpha = alphas[irep,iband])
+                axes[irep].set_ylim(-5*data_std*kscale, 5*data_std*kscale)
                 if plot_freq != None:
                     axes[irep].set_xlim(plot_freq[0], plot_freq[1])
-             axes[irep].text(hdu.frequencies.mean(),3*data_std,"ObsNum %d, Chassis %d, Repeat %d" %(onm,chassis,irep), ha="center")
+             axes[irep].text(hdu.frequencies.mean(),3*data_std*kscale,"ObsNum %d, Chassis %d, Repeat %d" %(onm,chassis,irep), ha="center")
     else:
         axes = fig.axes
         for iband in range(6):
-            axes[-1].plot(hdu.frequencies[iband], plot_data[0,iband], alpha = alphas[0,iband])
+            axes[-1].plot(hdu.frequencies[iband], kscale*plot_data[0,iband], alpha = alphas[0,iband])
             axes[-1].set_ylim(axes[0].get_ylim())
             if plot_freq != None:
                 axes[-1].set_xlim(plot_freq[0], plot_freq[1])
@@ -526,6 +526,21 @@ def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None):
     
     return fig
     
+def exposure(t):    
+    """ t = exposure time in sec
+    """
+    unit = 'sec'
+
+    if t/60 > 1:
+        t = t/60
+        unit = 'min'
+        if t/60 > 1:
+            t = t/60
+            unit = 'hrs'
+            if t/24 > 1:
+                t = t/24
+                unit = 'days'
+    return "%g %s" % (t,unit)
 
 def rsr_driver_start (clargs):
     
@@ -542,7 +557,7 @@ def rsr_driver_start (clargs):
     parser.add_argument('-t','--threshold',dest="cthresh", type=float, help="Thershold sigma value when coadding all observations")
     parser.add_argument('-o','--output', dest="output", default="", help="Output file name containing the spectrum")
     parser.add_argument('-f','--filter', dest="filter", default=0, help="Apply Savitzky-Golay filter (SGF) to reduce large scale trends in the spectrum. Must be an odd integer. This value represent the number of channels used to aproximate the baseline. Recomended values are larger than 21. Default is to not apply the SGF", type=int)
-    parser.add_argument('-s','--smothing', dest ="smooth", default=0, type=int, help="Number of channels of a boxcar lowpass filter applied  to the coadded spectrum. Default is to no apply filter")
+    parser.add_argument('-s','--smothing', dest ="smooth", default=0, type=int, help="Number of channels of a boxcar lowpass filter applied  to the coadded spectrum. Default is to not apply filter")
     parser.add_argument('-r','--repeat_thr', dest = "rthr", type = float,help="Threshold sigma value when averaging single observations repeats")  
     parser.add_argument('-n', '--notch_sigma', dest = "notch", help="Sigma cut for notch filter to eliminate large frecuency oscillations in spectrum. Needs to be run with -f option.", type =float)
 
@@ -587,6 +602,7 @@ def rsr_driver_start (clargs):
 
     process_info=OrderedDict()
 
+    kscale = 1000.0
     tint = 0.0
     real_tint = 0.0
     source = None
@@ -726,7 +742,7 @@ def rsr_driver_start (clargs):
             nc.hdu.baseline(order = args.baseline_order, subtract=True, windows=windows)
             
             if not waterpdf is None:
-                wfig = waterfall_plot(nc.hdu,thresh=args.rthr,plot_freq=plot_freq)
+                wfig = waterfall_plot(nc.hdu,thresh=args.rthr,plot_freq=plot_freq, kscale=kscale)
             
             if args.rthr:
                 nc.hdu.average_all_repeats(weight='sigma', threshold_sigma=args.rthr)
@@ -736,7 +752,7 @@ def rsr_driver_start (clargs):
                 rebaseline(nc, farg= args.filter,exclude=exclude)
             
             if not waterpdf is None:
-                waterfall_plot(nc.hdu, wfig, thresh=args.cthresh,plot_freq=plot_freq)
+                waterfall_plot(nc.hdu, wfig, thresh=args.cthresh,plot_freq=plot_freq, kscale=kscale)
                 waterpdf.savefig(wfig)
                 
 
@@ -846,21 +862,23 @@ def rsr_driver_start (clargs):
         pl = plt.figure()
         #plt.ion()
         #plt.ioff()
-        plt.step(hdu.compfreq, hdu.compspectrum[0,:], where="mid")
+        plt.step(hdu.compfreq, kscale*hdu.compspectrum[0,:], where="mid")
         if plot_freq != None:
             plt.xlim(plot_freq[0], plot_freq[1])
         plt.xlabel('Frequency (GHz)')
-        plt.ylabel('TA* (K)')
-        plt.suptitle("%s Tint=%f hrs " %(hdu.header.SourceName, real_tint/3600.0))
+        plt.ylabel('TA* (mK)')    #  if kscale != 1000 these labels are all wrong
+        plt.suptitle("%s Tint=%s" %(hdu.header.SourceName, exposure(real_tint)))
+        plt.savefig('rsr.driver1.png')
+        print("Written rsr.driver1.png")        
         plb = plt.figure()
         for i in range(hdu.spectrum.shape[1]):
-            plt.step(hdu.frequencies[i], hdu.spectrum[0,i,:], where="mid", label = "Band %d Board %d"%(i,board[i]))
+            plt.step(hdu.frequencies[i], kscale*hdu.spectrum[0,i,:], where="mid", label = "Band %d" % i)
         plt.legend(loc="best")
         if plot_freq != None:
             plt.xlim(plot_freq[0], plot_freq[1])
         plt.xlabel('Frequency (GHz)')
-        plt.ylabel('TA* (K)')
-        plt.suptitle("%s Tint=%f hrs " %(hdu.header.SourceName, real_tint/3600.0))
+        plt.ylabel('TA* (mK)')
+        plt.suptitle("%s Tint=%s " %(hdu.header.SourceName, exposure(real_tint)))
         plt.savefig('rsr.driver.png')
         print("Written rsr.driver.png")
         #plt.show()
