@@ -872,7 +872,7 @@ def rsr_driver_start (clargs):
         print("Written rsr.driver1.png")        
         plb = plt.figure()
         for i in range(hdu.spectrum.shape[1]):
-            plt.step(hdu.frequencies[i], kscale*hdu.spectrum[0,i,:], where="mid", label = "Band %d" % i)
+            plt.step(hdu.frequencies[i], kscale*hdu.spectrum[0,i,:], where="mid", label = "Board %d" % i)
         plt.legend(loc="best")
         if plot_freq != None:
             plt.xlim(plot_freq[0], plot_freq[1])
