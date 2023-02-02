@@ -17,7 +17,7 @@ except ImportError:
     from dreampy.redshift.netcdf import RedshiftNetCDFFile
     from dreampy.redshift.netcdf.redshift_scan import RedshiftScan
     from dreampy.redshift.utils.spectrum_utils import blank as spec_blank_value
-from datetime import date
+from datetime import datetime
 from scipy import signal
 from scipy import interpolate
 from scipy import stats
@@ -79,7 +79,7 @@ def rsr_output_header(hdu, infodict, add_comment = False):
     """
     sigma = hdu.sigma.copy().squeeze()
 
-    cdate = date.today()
+    cdatetime = datetime.now()
     
     ctag = ""
     if add_comment:
@@ -93,7 +93,7 @@ def rsr_output_header(hdu, infodict, add_comment = False):
     string += ctag + "Source DEC: %s\n" % hdu.header.DEC
     string += ctag + "Pipeline version (DREAMPY): %s\n" % dreampy.version()
     string += ctag + "Driver script version: %s\n" % script_version 
-    string += ctag + "Date of Reduction (YYYY-MM-DD): %s\n"%cdate.strftime("%Y-%b-%d")
+    string += ctag + "Date of Reduction: %s\n"%cdatetime.strftime("%Y-%m-%dT%H:%M:%S")
     string += ctag + "Frequency Units: GHz\n"
     string += ctag + "Spectrum Units: K (T_A)\n"
     string += ctag + "Band intervals (GHz):"
@@ -554,7 +554,7 @@ def rsr_driver_start (clargs):
 
     parser.add_argument('obslist', help="Text file with obsnums to process. Either one obsnum per row or a range of observation numbers separated by hyphens.")
     parser.add_argument('-p', dest ="doplot", action="store_true", help="Produce default plots")
-    parser.add_argument('-t','--threshold',dest="cthresh", type=float, help="Thershold sigma value when coadding all observations")
+    parser.add_argument('-t','--threshold',dest="cthresh", type=float, help="Threshold sigma value when coadding all observations")
     parser.add_argument('-o','--output', dest="output", default="", help="Output file name containing the spectrum")
     parser.add_argument('-f','--filter', dest="filter", default=0, help="Apply Savitzky-Golay filter (SGF) to reduce large scale trends in the spectrum. Must be an odd integer. This value represent the number of channels used to aproximate the baseline. Recomended values are larger than 21. Default is to not apply the SGF", type=int)
     parser.add_argument('-s','--smothing', dest ="smooth", default=0, type=int, help="Number of channels of a boxcar lowpass filter applied  to the coadded spectrum. Default is to not apply filter")
