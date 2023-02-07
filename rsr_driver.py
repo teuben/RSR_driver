@@ -6,6 +6,8 @@
  (C) 2019 Large Millimeter Telescope (LMT), Mexico
  Released under GNU Public License (GPL v3)
  author: David O. Sánchez Argüelles (domars@inaoep.mx)
+
+ Warning:   the variable containing the name "band" is often used where "board" is meant
 """
 try:
     import dreampy3 as dreampy
@@ -32,7 +34,7 @@ import warnings
 import copy
 import shlex
 
-script_version ="0.6.5-pjt"
+script_version ="0.6.6-pjt"
 
 
 def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
@@ -96,14 +98,14 @@ def rsr_output_header(hdu, infodict, add_comment = False):
     string += ctag + "Date of Reduction: %s\n"%cdatetime.strftime("%Y-%m-%dT%H:%M:%S")
     string += ctag + "Frequency Units: GHz\n"
     string += ctag + "Spectrum Units: K (T_A)\n"
-    string += ctag + "Band intervals (GHz):"
+    string += ctag + "Board intervals (GHz):"
     for i in range(sigma.shape[0]):
         wvalid = numpy.where(numpy.isfinite(hdu.spectrum[0,i]))
         if len(wvalid[0]) > 0:
             string +="(%.3f-%.3f)," %(hdu.frequencies[i,wvalid].min(), hdu.frequencies[i,wvalid].max())
     #string+= "(%.3f-%.3f)\n" %(hdu.frequencies[-1].min(), hdu.frequencies[-1].max())
     string = string[:-1]+"\n"
-    string += ctag + "Sigma per band: "
+    string += ctag + "Sigma per board: "
     for i in range(sigma.shape[0]):
         string +="%f," %sigma[i]
     #string += "%f\n"%sigma[-1]
@@ -198,7 +200,7 @@ def rsr_notchfilter(freq_in, data_in, sigma):
     return dspec
 
 def rebaseline (nc, farg=None, exclude = None, notch = False):
-    """Performs a Savitzky-Golay (SG) or a Notch filter on RSR band based data. SG filter is suitable for low order trends in the data. Notch filter is sutable for    oscilations in the baseline. 
+    """Performs a Savitzky-Golay (SG) or a Notch filter on RSR board based data. SG filter is suitable for low order trends in the data. Notch filter is sutable for    oscilations in the baseline. 
     
        Args:
         nc (RedshiftNetCDFFile): Object containing the spectrum.
@@ -238,7 +240,7 @@ def rebaseline (nc, farg=None, exclude = None, notch = False):
                 sec_end.append(isample)
                 onScan = False
         nscans = len(sec_start)
-        print("Found %d scans on band %s on obs %s"%(nscans,iband, hdu.header.obs_string()))
+        print("Found %d scans on board %s on obs %s"%(nscans,iband, hdu.header.obs_string()))
         for iscan in range(nscans):
             
             if not notch:
@@ -408,11 +410,11 @@ def setup_default_windows (nc):
     return windows
 
 def update_windows (windows, limits, exclude):
-    """ Modify the windows dictionaty to exlucde the interval freqs-widths to freqs+widths from the baseline estimation
+    """ Modify the windows dictionary to exclude the interval freqs-widths to freqs+widths from the baseline estimation
     
         Parameters:
             windows (dict): Dictionary with the current values of windows
-            limits (dict): Limits of each RSR band, usually a defaul windows dict
+            limits (dict): Limits of each RSR board, usually a defaul windows dict
             exclude (dict): A dictionary with the freqs and widths to exclude 
     """
     freqs = exclude['freqs']
@@ -553,35 +555,62 @@ def rsr_driver_start (clargs):
     parser = argparse.ArgumentParser(description='Simple wrapper to process RSR spectra')
 
     parser.add_argument('obslist', help="Text file with obsnums to process. Either one obsnum per row or a range of observation numbers separated by hyphens.")
-    parser.add_argument('-p', dest ="doplot", action="store_true", help="Produce default plots")
-    parser.add_argument('-t','--threshold',dest="cthresh", type=float, help="Threshold sigma value when coadding all observations")
-    parser.add_argument('-o','--output', dest="output", default="", help="Output file name containing the spectrum")
-    parser.add_argument('-f','--filter', dest="filter", default=0, help="Apply Savitzky-Golay filter (SGF) to reduce large scale trends in the spectrum. Must be an odd integer. This value represent the number of channels used to aproximate the baseline. Recomended values are larger than 21. Default is to not apply the SGF", type=int)
-    parser.add_argument('-s','--smothing', dest ="smooth", default=0, type=int, help="Number of channels of a boxcar lowpass filter applied  to the coadded spectrum. Default is to not apply filter")
-    parser.add_argument('-r','--repeat_thr', dest = "rthr", type = float,help="Threshold sigma value when averaging single observations repeats")  
-    parser.add_argument('-n', '--notch_sigma', dest = "notch", help="Sigma cut for notch filter to eliminate large frecuency oscillations in spectrum. Needs to be run with -f option.", type =float)
+    parser.add_argument('-p', dest ="doplot", action="store_true",
+                        help="Produce default plots")
+    parser.add_argument('-t','--threshold',dest="cthresh",
+                        type=float,
+                        help="Threshold sigma value when coadding all observations")
+    parser.add_argument('-o','--output', dest="output", default="",
+                        help="Output file name containing the spectrum")
+    parser.add_argument('-f','--filter', dest="filter", default=0,
+                        type=int,
+                        help="Apply Savitzky-Golay filter (SGF) to reduce large scale trends in the spectrum. Must be an odd integer. This value represent the number of channels used to aproximate the baseline. Recomended values are larger than 21. Default is to not apply the SGF")
+    parser.add_argument('-s','--smothing', dest ="smooth", default=0,
+                        type=int,
+                        help="Number of channels of a boxcar lowpass filter applied  to the coadded spectrum. Default is to not apply filter")
+    parser.add_argument('-r','--repeat_thr', dest = "rthr",
+                        type = float,
+                        help="Threshold sigma value when averaging single observations repeats")  
+    parser.add_argument('-n', '--notch_sigma', dest = "notch",
+                        type =float,                        
+                        help="Sigma cut for notch filter to eliminate large frecuency oscillations in spectrum. Needs to be run with -f option.")
 
-    parser.add_argument('--simulate', nargs='+', help="Insert a simulated line into spectrum. The format is a list or a set of three elements Amplitude central_frequency line_velocity_width.", type = float)
+    parser.add_argument('--simulate', nargs='+',
+                        type = float,
+                        help="Insert a simulated line into spectrum. The format is a list or a set of three elements Amplitude central_frequency line_velocity_width.")
 
-    parser.add_argument('-d','--data_lmt_path', dest = "data_lmt",help="Path where the LMT data is located (default is to look for the DATA_LMT environment variable or the /data_lmt folder")  
+    parser.add_argument('-d','--data_lmt_path', dest = "data_lmt",
+                        help="Path where the LMT data is located (default is to look for the DATA_LMT environment variable or the /data_lmt folder")  
     
-    parser.add_argument('-b', dest="baseline_order", default = 1, help="Baseline calculation order", type=int)
+    parser.add_argument('-b', dest="baseline_order", default = 1,
+                        type=int,
+                        help="Baseline calculation order")
+                 
+    parser.add_argument('--exclude', nargs='+', dest ="exclude",
+                        help="A set of frequencies to exclude from baseline calculations. Format is central frequency width. \
+                        Eg. --exclude 76.0 0.2 96.0 0.3 excludes the 75.8-76.2 GHz and the 95.7-96.3 intervals from the baseline calculations.")
     
-    parser.add_argument('--exclude', nargs='+', dest ="exclude", help="A set of frequencies to exclude from baseline calculations. Format is central frequenciy width. Ej --exclude 76.0 0.2 96.0 0.3 excludes the 75.8-76.2 GHz and the 95.7-96.3 intervals from the baselien calculations.")
-    
-    parser.add_argument ('-j', dest="jacknife", action="store_true",help ="Perform jacknife simulation")
+    parser.add_argument ('-j', dest="jacknife", action="store_true",
+                         help ="Perform jacknife simulation")
 
 
-    parser.add_argument('-c', dest= "chassis", nargs='+', help = "List of chassis to use in reduction. Default is the four chassis")
+    parser.add_argument('-c', dest= "chassis", nargs='+',
+                        help = "List of chassis to use in reduction. Default is the four chassis")
 
-    parser.add_argument('-B', '--badlags', help="A bad lags file with list of (chassis,board,channel) tuples as produced by seek_bad_channels")
+    parser.add_argument('-B', '--badlags',
+                        help="A bad lags file with list of (Chassis,Board,LagChannel) tuples as produced by badlags.py")
     
-    parser.add_argument('-R', '--rfile', help="A file with information of band data to ignore from analysis. \
-                        The file must include the obsnum, chassis and band number to exclude separated by comas. One band per row")
+    parser.add_argument('-R', '--rfile',
+                        help="A file with information of board data to ignore from analysis. \
+                        The file must include the obsnum, chassis and board number to exclude separated by commas. \
+                        One board per row")
     
-    parser.add_argument('-w', '--waterfall-file', dest ="waterfall", help= "Request the driver to produce waterfall plot for each input file", type=str)
+    parser.add_argument('-w', '--waterfall-file', dest ="waterfall",
+                        type=str,
+                        help= "Request the driver to produce waterfall plot for each input file")
 
-    parser.add_argument('--no-baseline-sub', dest="nosub", action="store_false", help="Disable subtraction of polynomial baseline. NOT RECOMMENDED.")
+    parser.add_argument('--no-baseline-sub', dest="nosub", action="store_false",
+                        help="Disable subtraction of polynomial baseline. NOT RECOMMENDED.")
 
     args = parser.parse_args(clargs)
 
@@ -749,10 +778,10 @@ def rsr_driver_start (clargs):
             else:
                 nc.hdu.average_all_repeats(weight='sigma')
             if args.filter:
-                rebaseline(nc, farg= args.filter,exclude=exclude)
+                rebaseline(nc, farg=args.filter, exclude=exclude)
             
             if not waterpdf is None:
-                waterfall_plot(nc.hdu, wfig, thresh=args.cthresh,plot_freq=plot_freq, kscale=kscale)
+                waterfall_plot(nc.hdu, wfig, thresh=args.cthresh, plot_freq=plot_freq, kscale=kscale)
                 waterpdf.savefig(wfig)
                 
 
