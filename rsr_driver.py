@@ -702,7 +702,7 @@ def rsr_driver_start (clargs):
                         print ("Remove band %d from ObsNum %d Chassis %d" % (iband, ObsNum, chassis))
 
             
-            nc.hdu.baseline(order = args.baseline_order, subtract=True, windows=windows)
+            nc.hdu.baseline(order = args.baseline_order, subtract=args.nosub, windows=windows)
             
             if not waterpdf is None:
                 wfig = waterfall_plot(nc.hdu,thresh=args.rthr)
