@@ -696,9 +696,16 @@ def rsr_driver_start (clargs):
             
             if not remove_keys is None:
                 rk = rpattern % (ObsNum, chassis)
+                drk = rpattern %(-1,chassis)
+                full_windows = setup_default_windows(nc)
+                wk = None
                 if rk in remove_keys.keys():
-                    for iband in remove_keys[rk]:
-                        nc.hdu.blank_frequencies ({iband:[(windows[iband][0][0],windows[iband][0][-1]),]})
+                    wk = rk
+                elif drk in remove_keys.keys():
+                    wk = drk
+                if not wk is None:
+                    for iband in remove_keys[wk]:
+                        nc.hdu.blank_frequencies ({iband:[(full_windows[iband][0][0],full_windows[iband][0][-1]),]})
                         print ("Remove band %d from ObsNum %d Chassis %d" % (iband, ObsNum, chassis))
 
             
