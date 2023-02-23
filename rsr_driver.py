@@ -480,6 +480,9 @@ def load_obsnum_file(ifile):
 
 
 def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None, kscale=1000):
+    """
+    kscale:     by default we now scale from K to mK
+    """
     
     from matplotlib import pyplot as plt
     
@@ -509,6 +512,7 @@ def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None, kscale=1000):
     except:
         chassis = hdu.header.ChassisNumber
     if fig is None:
+        # plot the repeat integrations
         fig, axes = plt.subplots (nrows=nreps+1, ncols=1, sharex = True)
         for irep in range(nreps):
              for iband in range(6):
@@ -518,6 +522,7 @@ def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None, kscale=1000):
                     axes[irep].set_xlim(plot_freq[0], plot_freq[1])
              axes[irep].text(hdu.frequencies.mean(),3*data_std*kscale,"ObsNum %d, Chassis %d, Repeat %d" %(onm,chassis,irep), ha="center")
     else:
+        # plot the chassis averages
         axes = fig.axes
         for iband in range(6):
             axes[-1].plot(hdu.frequencies[iband], kscale*plot_data[0,iband], alpha = alphas[0,iband])
