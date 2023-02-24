@@ -34,7 +34,7 @@ import warnings
 import copy
 import shlex
 
-script_version ="0.6.6-pjt"
+script_version ="0.7.0-pjt"
 
 
 def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
@@ -439,7 +439,6 @@ def update_windows (windows, limits, exclude):
                     else:
                         newtuples.append(ituple)
                 windows[iband]= newtuples
-                
 
 def load_obsnum_file(ifile):
     """ Get a list ob observation number from the input file
@@ -517,7 +516,7 @@ def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None, kscale=1000):
         for irep in range(nreps):
              for iband in range(6):
                 axes[irep].plot(hdu.frequencies[iband], kscale*plot_data[irep,iband], alpha = alphas[irep,iband])
-                axes[irep].set_ylim(-5*data_std*kscale, 5*data_std*kscale)
+                axes[irep].set_ylim(-3*data_std*kscale, 3*data_std*kscale)
                 if plot_freq != None:
                     axes[irep].set_xlim(plot_freq[0], plot_freq[1])
              axes[irep].text(hdu.frequencies.mean(),3*data_std*kscale,"ObsNum %d, Chassis %d, Repeat %d" %(onm,chassis,irep), ha="center")
@@ -532,6 +531,14 @@ def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None, kscale=1000):
         axes[-1].text(hdu.frequencies.mean(),3.0/5.0*axes[0].get_ylim()[1],"ObsNum %d, Chassis %d, Averaged" %(onm,chassis), ha="center")
     
     return fig
+
+def default_blanking (nc, chassis):
+    """
+       Apply default blanking for all observations.
+    """
+    if chassis in(2,3): 
+        nc.hdu.blank_frequencies( {3: [(95.5,97.0),]} )
+    
     
 def exposure(t):    
     """ t = exposure time in sec
@@ -686,6 +693,13 @@ def rsr_driver_start (clargs):
                     ronum, rchassis, rband = re.split("\s|,", iline.split("#")[0].strip())
                 else:
                     ronum, rchassis, rband = iline.split("#")[0].split(",")
+
+                # DS: basically the same
+                #iline = iline.strip()
+                #if iline =="" or iline.find("#") ==0:
+                #    continue
+                #ronum, rchassis, rband = iline.split(",")
+
                 rkey = rpattern %(int (ronum),int(rchassis))
                 print("PJT rfile",ronum,rchassis,rband,rkey)
                 if not rkey in remove_keys.keys():
@@ -758,22 +772,25 @@ def rsr_driver_start (clargs):
             
             if args.simulate:
                 insert_sim(nc, *args.simulate)
-
-                
-            # @todo why do chassis (2,3) need this blanked???
-            if False:
-                if chassis in(2,3): 
-                    nc.hdu.blank_frequencies( {3: [(95.5,97.0),]} )
+            
+            default_blanking(nc,chassis)
             
             if not remove_keys is None:
+                
                 rk = rpattern % (ObsNum, chassis)
+                drk = rpattern %(-1,chassis)
+                full_windows = setup_default_windows(nc)
+                wk = None
                 if rk in remove_keys.keys():
-                    for iband in remove_keys[rk]:
-                        nc.hdu.blank_frequencies ({iband:[(windows[iband][0][0],windows[iband][0][-1]),]})
-                        print("Remove board %d from ObsNum %d Chassis %d" % (iband, ObsNum, chassis))
+                    wk = rk
+                elif drk in remove_keys.keys():
+                    wk = drk
+                if not wk is None:
+                    for iband in remove_keys[wk]:
+                        nc.hdu.blank_frequencies ({iband:[(full_windows[iband][0][0],full_windows[iband][0][-1]),]})
+                        print ("Ignore data from band %d from ObsNum %d Chassis %d" % (iband, ObsNum, chassis))
 
-            
-            nc.hdu.baseline(order = args.baseline_order, subtract=True, windows=windows)
+            nc.hdu.baseline(order = args.baseline_order, subtract=args.nosub, windows=windows)
             
             if not waterpdf is None:
                 wfig = waterfall_plot(nc.hdu,thresh=args.rthr,plot_freq=plot_freq, kscale=kscale)
@@ -858,7 +875,8 @@ def rsr_driver_start (clargs):
     if args.smooth > 0:
         add_info(process_info, "Smoothing Channels", args.smooth, "")
         hdu.smooth(nchan=args.smooth)
-        
+    
+    
     hdu.make_composite_scan()
     compsigma = update_compspec_sigma(hdu)
     
@@ -879,7 +897,7 @@ def rsr_driver_start (clargs):
     bspec_file = open(bspec_outfilename,"w")
     bspec_file.writelines(bspec_lines)
     bspec_file.close()
-    
+
 
     if args.doplot:
         # board number for given band
