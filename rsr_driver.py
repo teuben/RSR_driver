@@ -105,9 +105,9 @@ def rsr_output_header(hdu, infodict, add_comment = False):
             string +="(%.3f-%.3f)," %(hdu.frequencies[i,wvalid].min(), hdu.frequencies[i,wvalid].max())
     #string+= "(%.3f-%.3f)\n" %(hdu.frequencies[-1].min(), hdu.frequencies[-1].max())
     string = string[:-1]+"\n"
-    string += ctag + "Sigma per board: "
+    string += ctag + "Sigma per board (mK): "
     for i in range(sigma.shape[0]):
-        string +="%f," %sigma[i]
+        string +="%f," % (sigma[i]*1000)
     #string += "%f\n"%sigma[-1]
     string=string[:-1]+"\n"
     for ikey in infodict.keys():
@@ -172,13 +172,13 @@ def rsr_savgolfilter(data_in, freq_in, fwind, exclude=None):
 
 def rsr_notchfilter(freq_in, data_in, sigma):
             
-    """ Implement a naive notch filter to RSR spectra in order to remove oscillations in the baseline. It work by analizing the RSR data
-        PSD. If a peak in the PSD exceed the sigma thershold it is removed.
+    """ Implement a naive notch filter to RSR spectra in order to remove oscillations in the baseline. It works by analyzing the RSR data
+        PSD. If a peak in the PSD exceed the sigma threshold it is removed.
     
         Args:
             freq_in (float ndarray): RSR Frequency
             data_in (float ndarray): RSR Spectrum
-            sigma (float):           Sigma threshold level to consider a baseline oscilation to be removed.
+            sigma (float):           Sigma threshold level to consider a baseline oscillation to be removed.
         
         Note: The RSR data (spectra) is mean subtracted before any calculation.
     """
@@ -200,11 +200,13 @@ def rsr_notchfilter(freq_in, data_in, sigma):
     return dspec
 
 def rebaseline (nc, farg=None, exclude = None, notch = False):
-    """Performs a Savitzky-Golay (SG) or a Notch filter on RSR board based data. SG filter is suitable for low order trends in the data. Notch filter is sutable for    oscilations in the baseline. 
+    """Performs a Savitzky-Golay (SG) or a Notch filter on RSR board based data.
+       SG filter is suitable for low order trends in the data. Notch filter is sutable for
+      oscillations in the baseline. 
     
        Args:
         nc (RedshiftNetCDFFile): Object containing the spectrum.
-        farg (int): Filter argument window. In case of the SG filter is the window lenght. For the notch filter is the sigma thershold for cutting a frequency
+        farg (int): Filter argument window. In case of the SG filter is the window lenght. For the notch filter is the sigma threshold for cutting a frequency
         exclude (dict): A dictionary with the frequencies to exclude from baseline calculations.
         notch (bool): If false (default) apply Savitzky-Golay filter. If True apply notch filter.
        Note:
@@ -477,13 +479,16 @@ def load_obsnum_file(ifile):
         raise ValueError ("Input file does not contain any valid lines")
     return obsnum_list
 
-
+
 def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None, kscale=1000):
     """
     kscale:     by default we now scale from K to mK
     """
-    
-    from matplotlib import pyplot as plt
+
+    try:
+        from matplotlib import pyplot as plt
+    except:
+        print("FATAL: matplotlib error-1")
     
     nreps = hdu.spectrum.shape[0]
     
@@ -499,6 +504,8 @@ def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None, kscale=1000):
     if data_std <= 0.0 or numpy.isnan(data_std):
         print("Warning: all data clipped. ")
         data_std = 1.0
+    print('PJT waterfall: data_std=',data_std,nreps,plot_data.shape)
+    print('PJT hdu.sigma',hdu.sigma)
     
     alphas = numpy.ones(plot_data.shape[:2])
     if thresh:
@@ -531,7 +538,7 @@ def waterfall_plot (hdu, fig=None, thresh=None, plot_freq=None, kscale=1000):
         axes[-1].text(hdu.frequencies.mean(),3.0/5.0*axes[0].get_ylim()[1],"ObsNum %d, Chassis %d, Averaged" %(onm,chassis), ha="center")
     
     return fig
-
+
 def default_blanking (nc, chassis):
     """
        Apply default blanking for all observations.
@@ -577,7 +584,7 @@ def rsr_driver_start (clargs):
     parser.add_argument('-f','--filter', dest="filter", default=0,
                         type=int,
                         help="Apply Savitzky-Golay filter (SGF) to reduce large scale trends in the spectrum. Must be an odd integer. This value represent the number of channels used to aproximate the baseline. Recomended values are larger than 21. Default is to not apply the SGF")
-    parser.add_argument('-s','--smothing', dest ="smooth", default=0,
+    parser.add_argument('-s','--smoothing', dest ="smooth", default=0,
                         type=int,
                         help="Number of channels of a boxcar lowpass filter applied  to the coadded spectrum. Default is to not apply filter")
     parser.add_argument('-r','--repeat_thr', dest = "rthr",
@@ -603,14 +610,16 @@ def rsr_driver_start (clargs):
                         Eg. --exclude 76.0 0.2 96.0 0.3 excludes the 75.8-76.2 GHz and the 95.7-96.3 intervals from the baseline calculations.")
     
     parser.add_argument ('-j', dest="jacknife", action="store_true",
-                         help ="Perform jacknife simulation")
+                        help ="Perform jacknife simulation")
 
-
+    parser.add_argument('--blanking', dest="blanking", action="store_false",
+                        help = "Don't apply a default blanking")
+    
     parser.add_argument('-c', dest= "chassis", nargs='+',
                         help = "List of chassis to use in reduction. Default is the four chassis")
 
     parser.add_argument('-B', '--badlags',
-                        help="A bad lags file with list of (Chassis,Board,LagChannel) tuples as produced by badlags.py")
+                        help="A bad lags file with list of (Chassis,Board,LagChannel,ObsNum) tuples as produced by badlags.py")
     
     parser.add_argument('-R', '--rfile',
                         help="A file with information of board data to ignore from analysis. \
@@ -701,10 +710,10 @@ def rsr_driver_start (clargs):
                 #ronum, rchassis, rband = iline.split(",")
 
                 rkey = rpattern %(int (ronum),int(rchassis))
-                print("PJT rfile",ronum,rchassis,rband,rkey)
                 if not rkey in remove_keys.keys():
                     remove_keys[rkey] = []
                 remove_keys[rkey].append(int(rband))
+        print("PJT rfile remove_keys:",remove_keys)
 
     # PJT hack (either way, this will reset the lags in ~/.dreampy/dreampyrc if you don't supply them)
     if args.badlags:
@@ -716,15 +725,18 @@ def rsr_driver_start (clargs):
     waterpdf = None
     backend = None
     if args.waterfall:
-        import matplotlib
-        backend= matplotlib.get_backend()
-        matplotlib.use("pdf")
-        from matplotlib.backends.backend_pdf import PdfPages
-        waterpdf = PdfPages(args.waterfall)
+        try:
+            import matplotlib
+            backend= matplotlib.get_backend()
+            matplotlib.use("pdf")
+            from matplotlib.backends.backend_pdf import PdfPages
+            waterpdf = PdfPages(args.waterfall)
+        except:
+            print("FATAL: matplotlib error-2")
         
 
     info_obsnum=""
-
+
     for ObsNum in Obslist:
         nfiles_per_onum = 0
         tint_per_onum = 0.
@@ -772,8 +784,12 @@ def rsr_driver_start (clargs):
             
             if args.simulate:
                 insert_sim(nc, *args.simulate)
-            
-            default_blanking(nc,chassis)
+
+            if args.blanking:
+                print("PJT - default blanking applied")
+                default_blanking(nc,chassis)
+            else:
+                print("PJT - no default blanking applied")
             
             if not remove_keys is None:
                 
@@ -903,37 +919,39 @@ def rsr_driver_start (clargs):
         # board number for given band
         board = [0,2,1,3,5,4]
         if not backend is None:
-            print("Attempt to switch backend to %s"%backend)
-            try:
-                matplotlib.use(backend, warn=False , force=True)
-            except TypeError:
-                matplotlib.use(backend, force=True)
-            
-        from matplotlib import pyplot as plt
-        
-        pl = plt.figure()
-        #plt.ion()
-        #plt.ioff()
-        plt.step(hdu.compfreq, kscale*hdu.compspectrum[0,:], where="mid")
-        if plot_freq != None:
-            plt.xlim(plot_freq[0], plot_freq[1])
-        plt.xlabel('Frequency (GHz)')
-        plt.ylabel('TA* (mK)')    #  if kscale != 1000 these labels are all wrong
-        plt.suptitle("%s Tint=%s" %(hdu.header.SourceName, exposure(real_tint)))
-        plt.savefig('rsr.driver1.png')
-        print("Written rsr.driver1.png")        
-        plb = plt.figure()
-        for i in range(hdu.spectrum.shape[1]):
-            plt.step(hdu.frequencies[i], kscale*hdu.spectrum[0,i,:], where="mid", label = "Board %d" % i)
-        plt.legend(loc="best")
-        if plot_freq != None:
-            plt.xlim(plot_freq[0], plot_freq[1])
-        plt.xlabel('Frequency (GHz)')
-        plt.ylabel('TA* (mK)')
-        plt.suptitle("%s Tint=%s " %(hdu.header.SourceName, exposure(real_tint)))
-        plt.savefig('rsr.driver.png')
-        print("Written rsr.driver.png")
-        #plt.show()
+            print("Attempt to switch backend to %s" % backend)
+            try:            
+                try:
+                    matplotlib.use(backend, warn=False , force=True)
+                except TypeError:
+                    matplotlib.use(backend, force=True)
+                from matplotlib import pyplot as plt
+            except:
+                print("FATAL: matplotlib error-3")
+
+            pl = plt.figure()
+            #plt.ion()
+            #plt.ioff()
+            plt.step(hdu.compfreq, kscale*hdu.compspectrum[0,:], where="mid")
+            if plot_freq != None:
+                plt.xlim(plot_freq[0], plot_freq[1])
+            plt.xlabel('Frequency (GHz)')
+            plt.ylabel('TA* (mK)')    #  if kscale != 1000 these labels are all wrong
+            plt.suptitle("%s Tint=%s" %(hdu.header.SourceName, exposure(real_tint)))
+            plt.savefig('rsr.driver1.png')
+            print("Written rsr.driver1.png")        
+            plb = plt.figure()
+            for i in range(hdu.spectrum.shape[1]):
+                plt.step(hdu.frequencies[i], kscale*hdu.spectrum[0,i,:], where="mid", label = "Board %d" % i)
+            plt.legend(loc="best")
+            if plot_freq != None:
+                plt.xlim(plot_freq[0], plot_freq[1])
+            plt.xlabel('Frequency (GHz)')
+            plt.ylabel('TA* (mK)')
+            plt.suptitle("%s Tint=%s " %(hdu.header.SourceName, exposure(real_tint)))
+            plt.savefig('rsr.driver.png')
+            print("Written rsr.driver.png")
+            #plt.show()
         
         
 if __name__ == "__main__":
