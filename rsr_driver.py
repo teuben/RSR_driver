@@ -34,7 +34,7 @@ import warnings
 import copy
 import shlex
 
-script_version ="0.7.0-pjt"
+script_version ="0.7.1-pjt"
 
 
 def rsrFileSearch (obsnum, chassis, root='/data_lmt/', full = True):
@@ -94,7 +94,8 @@ def rsr_output_header(hdu, infodict, add_comment = False):
     string += ctag + "Source RA: %s\n" % hdu.header.RA
     string += ctag + "Source DEC: %s\n" % hdu.header.DEC
     string += ctag + "Pipeline version (DREAMPY): %s\n" % dreampy.version()
-    string += ctag + "Driver script version: %s\n" % script_version 
+    string += ctag + "Driver script version: %s\n" % script_version
+    string += ctag + "Date of Observation: %s\n"% hdu.header.date_obs
     string += ctag + "Date of Reduction: %s\n"%cdatetime.strftime("%Y-%m-%dT%H:%M:%S")
     string += ctag + "Frequency Units: GHz\n"
     string += ctag + "Spectrum Units: K (T_A)\n"
@@ -625,6 +626,10 @@ def rsr_driver_start (clargs):
                         help="A file with information of board data to ignore from analysis. \
                         The file must include the obsnum, chassis and board number to exclude separated by commas. \
                         One board per row")
+
+    parser.add_argument('--date_obs', dest="date_obs",
+                        type=str,
+                        help= "Set the Date of Observation")
     
     parser.add_argument('-w', '--waterfall-file', dest ="waterfall",
                         type=str,
@@ -659,6 +664,9 @@ def rsr_driver_start (clargs):
     plot_freq = [72.5, 111.5]    # or pick None to auto-scale
         
     Obslist = load_obsnum_file(args.obslist)
+
+    # hack to get the lmtoy_.rc date_obs into the header
+    print("PJT date_obs",args.date_obs)
     
     if numpy.ndim(Obslist)==0:
         tmplist = []
@@ -891,7 +899,8 @@ def rsr_driver_start (clargs):
     if args.smooth > 0:
         add_info(process_info, "Smoothing Channels", args.smooth, "")
         hdu.smooth(nchan=args.smooth)
-    
+
+    hdu.header.date_obs = args.date_obs
     
     hdu.make_composite_scan()
     compsigma = update_compspec_sigma(hdu)
