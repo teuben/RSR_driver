@@ -929,6 +929,9 @@ def rsr_driver_start (clargs):
         board = [0,2,1,3,5,4]
         if not backend is None:
             print("Attempt to switch backend to %s" % backend)
+            if backend == "qtagg":   # PJT new 2024 unity hack
+               backend = "agg"
+               print("Attempt to switch backend to %s" % backend)               
             try:            
                 try:
                     matplotlib.use(backend, warn=False , force=True)
